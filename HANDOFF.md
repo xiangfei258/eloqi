@@ -72,9 +72,20 @@ P0 的逐条命令看 `P0_BRIEF.md`。
       （`internal/platform/linux/`）、OpenAI 非流式 ASR（`internal/asr/`）、TOML 配置
       （`internal/config/`）、voice 最小闭环（`internal/voice/`）、装配（`internal/app/`）。
       build/vet/`go test -race` 全绿。
-- [x] **P1 真机验证通过（2026-08-14）**：GNOME Wayland，热键 `Alt+Super` toggle，
-      本机 sglang-omni 转写，识别文本写入剪贴板。已知限制：GNOME Wayland 下 `wtype`
-      自动上屏不可用，当前为剪贴板模式（手动 Ctrl+V）。
+- [x] **P1 真机验证通过（2026-08-14，热键修复前）**：GNOME Wayland，热键
+      `Alt+Super` toggle，本机 sglang-omni 转写，识别文本写入剪贴板。已知限制：
+      GNOME Wayland 下 `wtype` 自动上屏不可用，当前为剪贴板模式（手动 Ctrl+V）。
+- [x] **P1 审查缺陷修复已完成**：
+      - evdev 普通热键 release 与原始 press 绑定配对，修饰键先松不再丢边沿；
+      - evdev / X11 modifier-only 增加 150ms 观察窗，期间出现其他键会取消候选；
+      - X11 全部 Xlib 调用收敛到单 goroutine，启用 XKB detectable auto-repeat；
+      - X11 为 CapsLock / NumLock / ScrollLock 等锁定修饰键注册全部变体；
+      - voice 聚合 recorder / ASR / 输出错误并传给 OnResult，不再用 Finalize 成功掩盖前置失败；
+      - session 在 recording 与 finalization 期间保持 current，禁止重叠上传并让 Stop 等待收尾；
+      - arecord 改为内部泵 + 有界缓冲，Stop 可唤醒阻塞 Read；
+      - diarization 清理默认关闭，且只处理完整转写结构，不破坏 `参考文献[1]` 等普通文本。
+- [ ] **热键修复后需重新真机验证**：至少覆盖普通 hold 键、toggle 键、modifier-only、
+      modifier+Tab 反例、CapsLock/NumLock 开关、长按自动重复、Ctrl 先松再松功能键。
 - [ ] 其余阶段（P2–P6）未开始。
 
 ---

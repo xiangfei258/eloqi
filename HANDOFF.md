@@ -68,17 +68,24 @@ P0 的逐条命令看 `P0_BRIEF.md`。
 - [x] **P0 项目脚手架已完成**：git 已 init、首次提交已建立，工作区干净。
 - [x] **P1.1 平台能力接口 + mock 已完成**：见 `internal/platform/`（接口）与
       `internal/platform/mock/`（mock），`go test -race ./...` 通过。
-- [ ] P1.2（Linux 平台实现）与 P1.3（最小闭环）未开始。
+- [x] **P1.2 + P1.3 代码已完成并提交**（`a85ef45`）：Linux 后端
+      （`internal/platform/linux/`）、OpenAI 非流式 ASR（`internal/asr/`）、TOML 配置
+      （`internal/config/`）、voice 最小闭环（`internal/voice/`）、装配（`internal/app/`）。
+      build/vet/`go test -race` 全绿。
+- [ ] **P1 真机验证未做**：录音/热键/剪贴板/上屏依赖真实设备与显示服务器，需人工验证。
 - [ ] 其余阶段（P2–P6）未开始。
 
 ---
 
 ## 6. 下一步（接上后该做什么）
 
-1. 对照 `TASKS.md` 的 **P1.2**：实现 Linux 平台能力（arecord 录音、OpenAI 兼容
-   非流式 ASR、wl-copy/wl-paste 剪贴板、wtype/XTest 上屏、evdev/X11 热键）。
-2. 然后 **P1.3**：串起“按下热键 → 录音 → 识别 → 输出”的最小闭环。
-3. 之后按 P2 → P3 → … 推进，每阶段对照 `TASKS.md` 的验收标准。
+1. **P1 真机验证**（人工）：准备 `eloqi.toml`（热键、ASR endpoint/api_key/model），
+   在 Wayland 或 X11 桌面按热键说话，确认文本写入剪贴板/上屏。依赖：`arecord`、
+   `wl-clipboard` 或 `xclip`、`wtype` 或 `xdotool`；Wayland 热键需用户加入 `input` 组，
+   X11 构建需 `libx11-dev`。
+2. 真机验证通过后进入 **P2**：显式状态机（idle/connecting/recording/stopping_delayed/
+   stopping/error）+ 停止延迟缓冲 + 双输出防重 + 停止异步化，并补齐状态机转移单测。
+3. 之后按 P3 → P4 → … 推进，每阶段对照 `TASKS.md` 的验收标准。
 
 > 环境提示：本机 Go 默认 `GOCACHE`/`GOMODCACHE` 位于 `/home/xiangchanglin/...`，
 > 在受限 shell 下只读；构建前先 `export GOCACHE="$PWD/.buildcache"

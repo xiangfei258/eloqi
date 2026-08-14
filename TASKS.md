@@ -45,19 +45,23 @@
 > 单元测试覆盖 `go test -race ./...` 通过。
 
 ### P1.2 Linux 平台实现
-- [ ] recorder：调外部 `arecord`（ALSA，16kHz/16bit/mono raw PCM）。
-- [ ] ASR：实现一个 OpenAI 兼容的非流式实现（录完上传，返回文本）。
-- [ ] clipboard：`wl-copy`/`wl-paste`（Wayland）、`xclip`（X11）。
-- [ ] autotype：写剪贴板后模拟粘贴（Wayland 用 wtype，X11 用 XTest）。
-- [ ] hotkey：Wayland 走 evdev，X11 走原生 X11。
+- [x] recorder：调外部 `arecord`（ALSA，16kHz/16bit/mono raw PCM）。
+- [x] ASR：实现一个 OpenAI 兼容的非流式实现（录完上传，返回文本）。
+- [x] clipboard：`wl-copy`/`wl-paste`（Wayland）、`xclip`（X11）。
+- [x] autotype：写剪贴板后模拟粘贴（Wayland 用 wtype，X11 用 xdotool）。
+- [x] hotkey：Wayland 走 evdev，X11 走原生 X11（cgo + Xlib）。
 
 ### P1.3 串起来（最小闭环）
-- [ ] 一个极简 voice 逻辑：热键按下开始录音、再按停止、识别后写剪贴板/上屏。
-- [ ] 配置项先用最简单形式（热键、ASR 地址/密钥）。
+- [x] 一个极简 voice 逻辑：热键按下开始录音、再按停止、识别后写剪贴板/上屏。
+- [x] 配置项先用最简单形式（热键、ASR 地址/密钥，TOML）。
 
 **验收标准**：
-- 在 Linux（先 Wayland 或 X11 其一）真机验证：按热键说话，松开后文本出现在焦点窗口。
-- 核心逻辑（状态流转）有单元测试，`go test -race ./...` 通过。
+- [ ] 在 Linux（先 Wayland 或 X11 其一）真机验证：按热键说话，松开后文本出现在焦点窗口。
+- [x] 核心逻辑（状态流转）有单元测试，`go test -race ./...` 通过。
+
+> 代码已完成并提交（见 `internal/platform/linux/`、`internal/asr/`、`internal/config/`、
+> `internal/voice/`、`internal/app/`）。**真机验证未做**：录音/热键/剪贴板/上屏依赖真实
+> 设备与显示服务器，需人工按下方清单验证后再视为 P1 关闭。
 
 ---
 

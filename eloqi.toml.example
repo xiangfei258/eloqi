@@ -1,0 +1,28 @@
+# Eloqui 示例配置。
+#
+# 用法：复制为 ~/.config/eloqi/config.toml 或 ./eloqi.toml，填好 ASR 后端后运行。
+# 所有字段均可省略，省略时使用内置默认值（热键 Ctrl+Alt+F1、hold 模式、自动上屏）。
+# 注意：当前 TOML 解析器是 P1 的最小实现，请按下面这种扁平写法填写。
+
+[hotkey]
+# mods：用 + 分隔的修饰键（ctrl / alt / super / shift），可留空表示裸键。
+mods = "Ctrl+Alt"
+# key：非修饰键（F1..F24 / Tab / CapsLock / 方向键 / Home / End / PageUp / PageDown /
+#      Insert / Delete / Num0..Num9），留空表示纯修饰键组合（如 Alt+Super）。
+key = "F1"
+# mode：hold（按住说话，松开停止）或 toggle（按一下开始，再按一下停止）。
+mode = "hold"
+
+[asr]
+# endpoint：OpenAI 兼容的转写接口完整 URL。
+endpoint = "https://api.openai.com/v1/audio/transcriptions"
+# api_key：Bearer 令牌。
+api_key = "sk-your-api-key"
+# model：转写模型名。
+model = "whisper-1"
+# language：可选的 BCP-47 语言提示（如 zh-CN），留空表示服务端自动检测。
+language = "zh-CN"
+
+[output]
+# auto_type：true 表示识别后模拟粘贴直接上屏；false 表示只写入剪贴板。
+auto_type = true

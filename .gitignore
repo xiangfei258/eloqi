@@ -11,6 +11,7 @@
 
 # Local configuration and state
 config.toml
+eloqi.toml
 .env
 
 # Editor and OS noise

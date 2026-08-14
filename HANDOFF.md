@@ -80,9 +80,17 @@ P0 的逐条命令看 `P0_BRIEF.md`。
       - evdev / X11 modifier-only 增加 150ms 观察窗，期间出现其他键会取消候选；
       - X11 全部 Xlib 调用收敛到单 goroutine，启用 XKB detectable auto-repeat；
       - X11 为 CapsLock / NumLock / ScrollLock 等锁定修饰键注册全部变体；
+      - X11 同步检查 `XGrabKey` 的异步协议错误，热键被占用时会回滚部分 grab
+        并向上层返回错误；旧式自动重复 release/press 对不再产生假松键；
+      - X11 从 keymap 跟踪全部左右修饰键，普通组合与 modifier-only 都按当前物理状态
+        精确匹配，松开左/右同类键之一不会误判整组松开；
+      - X11 关闭使用独立停止信号并等待事件循环收尾，即使队列已满或响应与
+        `done` 同时到达，`Close` 也会稳定返回并关闭 `Events`；
       - voice 聚合 recorder / ASR / 输出错误并传给 OnResult，不再用 Finalize 成功掩盖前置失败；
       - session 在 recording 与 finalization 期间保持 current，禁止重叠上传并让 Stop 等待收尾；
       - arecord 改为内部泵 + 有界缓冲，Stop 可唤醒阻塞 Read；
+      - arecord 的自然 EOF、进程退出和泵读取错误会传给上层；Stop 超时后升级为
+        Kill，停止期尾音频仍受 1 MiB 上限约束；
       - diarization 清理默认关闭，且只处理完整转写结构，不破坏 `参考文献[1]` 等普通文本。
 - [ ] **热键修复后需重新真机验证**：至少覆盖普通 hold 键、toggle 键、modifier-only、
       modifier+Tab 反例、CapsLock/NumLock 开关、长按自动重复、Ctrl 先松再松功能键。

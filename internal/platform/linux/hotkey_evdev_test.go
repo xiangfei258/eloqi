@@ -26,14 +26,16 @@ func TestEvdevReleaseSurvivesModifierReleasedFirst(t *testing.T) {
 	h := newTestEvdevHotkey(key)
 
 	var mods platform.Modifiers
+	refs := make(map[platform.Modifiers]int)
 	activeCode := make(map[uint16]platform.Key)
 	activeModOnly := make(map[platform.Key]bool)
 	pending := make(map[platform.Key]*time.Timer)
 	committed := make(chan platform.Key, 1)
 
-	mods |= platform.ModCtrl
-	h.handleRawEvent(rawEvent{code: 59, value: 1}, &mods, activeCode, activeModOnly, pending, committed)
-	h.handleRawEvent(rawEvent{code: 15, value: 1}, &mods, activeCode, activeModOnly, pending, committed)
+	// Press left Ctrl (code 29) so both the modifier bit and its refcount are
+	// established through the real code path, then press F1.
+	h.handleRawEvent(rawEvent{code: 29, value: 1}, &mods, refs, activeCode, activeModOnly, pending, committed)
+	h.handleRawEvent(rawEvent{code: 59, value: 1}, &mods, refs, activeCode, activeModOnly, pending, committed)
 
 	press := expectEvent(t, h.events)
 	if !press.Pressed || press.Key != key {
@@ -41,14 +43,14 @@ func TestEvdevReleaseSurvivesModifierReleasedFirst(t *testing.T) {
 	}
 
 	// Releasing Ctrl before F1 must still produce exactly one release edge.
-	h.handleRawEvent(rawEvent{code: 29, value: 0}, &mods, activeCode, activeModOnly, pending, committed)
+	h.handleRawEvent(rawEvent{code: 29, value: 0}, &mods, refs, activeCode, activeModOnly, pending, committed)
 	release := expectEvent(t, h.events)
 	if release.Pressed || release.Key != key {
 		t.Fatalf("release = %+v, want released %+v", release, key)
 	}
 
 	// The later F1 release must not produce a second release.
-	h.handleRawEvent(rawEvent{code: 15, value: 0}, &mods, activeCode, activeModOnly, pending, committed)
+	h.handleRawEvent(rawEvent{code: 59, value: 0}, &mods, refs, activeCode, activeModOnly, pending, committed)
 	expectNoEvent(t, h.events)
 }
 
@@ -57,22 +59,23 @@ func TestEvdevModifierOnlyCandidateCancelledByNextKey(t *testing.T) {
 	h := newTestEvdevHotkey(key)
 
 	var mods platform.Modifiers
+	refs := make(map[platform.Modifiers]int)
 	activeCode := make(map[uint16]platform.Key)
 	activeModOnly := make(map[platform.Key]bool)
 	pending := make(map[platform.Key]*time.Timer)
 	committed := make(chan platform.Key, 1)
 
 	mods |= platform.ModAlt
-	h.handleRawEvent(rawEvent{code: 56, value: 1}, &mods, activeCode, activeModOnly, pending, committed)
+	h.handleRawEvent(rawEvent{code: 56, value: 1}, &mods, refs, activeCode, activeModOnly, pending, committed)
 	mods |= platform.ModSuper
-	h.handleRawEvent(rawEvent{code: 125, value: 1}, &mods, activeCode, activeModOnly, pending, committed)
+	h.handleRawEvent(rawEvent{code: 125, value: 1}, &mods, refs, activeCode, activeModOnly, pending, committed)
 
 	if len(pending) != 1 {
 		t.Fatalf("pending candidates = %d, want 1", len(pending))
 	}
 
 	// Tab arriving inside the settle window cancels the chord before any edge.
-	h.handleRawEvent(rawEvent{code: 15, value: 1}, &mods, activeCode, activeModOnly, pending, committed)
+	h.handleRawEvent(rawEvent{code: 15, value: 1}, &mods, refs, activeCode, activeModOnly, pending, committed)
 	if len(pending) != 0 {
 		t.Fatal("candidate should be cancelled by Tab")
 	}
@@ -100,5 +103,35 @@ func expectNoEvent(t *testing.T, ch <-chan platform.KeyEvent) {
 	case ev := <-ch:
 		t.Fatalf("unexpected event: %+v", ev)
 	case <-time.After(30 * time.Millisecond):
+	}
+}
+
+func TestEvdevLeftAndRightModifierShareRefCount(t *testing.T) {
+	h := newTestEvdevHotkey()
+
+	var mods platform.Modifiers
+	refs := make(map[platform.Modifiers]int)
+	activeCode := make(map[uint16]platform.Key)
+	activeModOnly := make(map[platform.Key]bool)
+	pending := make(map[platform.Key]*time.Timer)
+	committed := make(chan platform.Key, 1)
+
+	// Left Ctrl then right Ctrl: the semantic Ctrl bit remains set.
+	h.handleRawEvent(rawEvent{code: 29, value: 1}, &mods, refs, activeCode, activeModOnly, pending, committed)
+	h.handleRawEvent(rawEvent{code: 97, value: 1}, &mods, refs, activeCode, activeModOnly, pending, committed)
+	if mods&platform.ModCtrl == 0 {
+		t.Fatal("Ctrl unexpectedly cleared while right Ctrl is held")
+	}
+
+	// Releasing only left Ctrl must leave Ctrl active.
+	h.handleRawEvent(rawEvent{code: 29, value: 0}, &mods, refs, activeCode, activeModOnly, pending, committed)
+	if mods&platform.ModCtrl == 0 {
+		t.Fatal("Ctrl cleared while right Ctrl is still held")
+	}
+
+	// Releasing right Ctrl finally clears it.
+	h.handleRawEvent(rawEvent{code: 97, value: 0}, &mods, refs, activeCode, activeModOnly, pending, committed)
+	if mods&platform.ModCtrl != 0 {
+		t.Fatal("Ctrl remained set after both physical keys were released")
 	}
 }

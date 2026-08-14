@@ -24,14 +24,15 @@ type ArecordRecorder struct {
 
 	// lifecycle is guarded by mu. cmd is written only during Start, before any
 	// Read or Stop caller can observe the recorder as started.
-	mu       sync.Mutex
-	cond     *sync.Cond
-	cmd      *exec.Cmd
-	started  bool
-	stopping bool
-	stopDone bool
-	closed   bool
-	buffer   []byte
+	mu        sync.Mutex
+	cond      *sync.Cond
+	cmd       *exec.Cmd
+	started   bool
+	stopping  bool
+	pumpDone  bool
+	tailTaken bool
+	closed    bool
+	buffer    []byte
 
 	pumpWG sync.WaitGroup
 }
@@ -92,7 +93,8 @@ func (r *ArecordRecorder) Start() error {
 
 	r.cmd = cmd
 	r.started = true
-	r.stopDone = false
+	r.pumpDone = false
+	r.tailTaken = false
 	r.pumpWG.Add(1)
 	go r.pump(stdout)
 	return nil
@@ -110,10 +112,10 @@ func (r *ArecordRecorder) Read(p []byte) (int, error) {
 		return 0, io.EOF
 	}
 
-	for len(r.buffer) == 0 && !r.stopDone {
+	for len(r.buffer) == 0 && !r.stopping && !r.pumpDone && !r.closed {
 		r.cond.Wait()
 	}
-	if len(r.buffer) == 0 {
+	if len(r.buffer) == 0 || r.stopping {
 		return 0, io.EOF
 	}
 
@@ -148,18 +150,20 @@ func (r *ArecordRecorder) Stop() ([]byte, error) {
 		_ = cmd.Process.Signal(sigInterrupt)
 	}
 	r.pumpWG.Wait()
-	_ = cmd.Wait()
+	if cmd != nil {
+		_ = cmd.Wait()
+	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.stopDone {
-		// A prior Stop consumed the remaining buffer. This call is a harmless
+	if r.tailTaken {
+		// A prior Stop claimed the remaining buffer. This call is a harmless
 		// lifecycle retry.
 		return nil, nil
 	}
 	remaining := r.buffer
 	r.buffer = nil
-	r.stopDone = true
+	r.tailTaken = true
 	r.cond.Broadcast()
 	return remaining, nil
 }
@@ -173,7 +177,7 @@ func (r *ArecordRecorder) Close() error {
 		return nil
 	}
 	cmd := r.cmd
-	running := r.started && !r.stopDone
+	running := r.started && !r.pumpDone
 	r.closed = true
 	r.cond.Broadcast()
 	r.mu.Unlock()
@@ -183,7 +187,9 @@ func (r *ArecordRecorder) Close() error {
 	}
 	if running {
 		r.pumpWG.Wait()
-		_ = cmd.Wait()
+		if cmd != nil {
+			_ = cmd.Wait()
+		}
 	}
 
 	r.mu.Lock()
@@ -212,7 +218,10 @@ func (r *ArecordRecorder) pump(stdout io.ReadCloser) {
 				// draining the buffer.
 				r.cond.Wait()
 			}
-			if !r.closed && !r.stopping {
+			// During Stop the pump keeps appending the arecord drain data. Stop
+			// is the sole owner of that tail: concurrent blocked Reads wake up
+			// and return io.EOF without consuming it.
+			if !r.closed {
 				r.buffer = append(r.buffer, chunk...)
 			}
 			r.cond.Broadcast()
@@ -220,7 +229,7 @@ func (r *ArecordRecorder) pump(stdout io.ReadCloser) {
 		}
 		if err != nil {
 			r.mu.Lock()
-			r.stopDone = true
+			r.pumpDone = true
 			r.cond.Broadcast()
 			r.mu.Unlock()
 			return

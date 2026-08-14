@@ -211,6 +211,7 @@ func (h *evdevHotkey) processEvents() {
 	defer h.wg.Done()
 
 	var modState platform.Modifiers
+	modifierRefs := make(map[platform.Modifiers]int)
 	activeCode := make(map[uint16]platform.Key)   // physical key -> binding
 	activeModOnly := make(map[platform.Key]bool)  // committed modifier-only binding
 	pending := make(map[platform.Key]*time.Timer) // settle-window candidates
@@ -224,7 +225,7 @@ func (h *evdevHotkey) processEvents() {
 	defer stopAllTimers()
 
 	handle := func(raw rawEvent) {
-		h.handleRawEvent(raw, &modState, activeCode, activeModOnly, pending, committed)
+		h.handleRawEvent(raw, &modState, modifierRefs, activeCode, activeModOnly, pending, committed)
 	}
 
 	for {
@@ -257,6 +258,7 @@ func (h *evdevHotkey) processEvents() {
 func (h *evdevHotkey) handleRawEvent(
 	raw rawEvent,
 	modState *platform.Modifiers,
+	modifierRefs map[platform.Modifiers]int,
 	activeCode map[uint16]platform.Key,
 	activeModOnly map[platform.Key]bool,
 	pending map[platform.Key]*time.Timer,
@@ -265,10 +267,19 @@ func (h *evdevHotkey) handleRawEvent(
 	pressed := raw.value == keyPress
 
 	if mod, ok := evdevModMap[raw.code]; ok {
+		// Left and right variants share a semantic bit, but each physical key
+		// holds its own reference. Releasing left Ctrl while right Ctrl is
+		// still down must not clear the shared Ctrl state.
 		if pressed {
-			*modState |= mod
-		} else {
-			*modState &^= mod
+			if modifierRefs[mod] == 0 {
+				*modState |= mod
+			}
+			modifierRefs[mod]++
+		} else if modifierRefs[mod] > 0 {
+			modifierRefs[mod]--
+			if modifierRefs[mod] == 0 {
+				*modState &^= mod
+			}
 		}
 		h.afterModifierChange(*modState, activeCode, activeModOnly, pending, committed)
 		return

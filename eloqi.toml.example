@@ -22,6 +22,8 @@ api_key = "sk-your-api-key"
 model = "whisper-1"
 # language：可选的 BCP-47 语言提示（如 zh-CN），留空表示服务端自动检测。
 language = "zh-CN"
+# Only enable for backends that return [timestamp][speaker] transcripts.
+strip_diarization = false
 
 [output]
 # auto_type：true 表示识别后模拟粘贴直接上屏；false 表示只写入剪贴板。

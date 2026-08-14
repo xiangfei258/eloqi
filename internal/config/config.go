@@ -39,6 +39,10 @@ type ASRConfig struct {
 	APIKey   string
 	Model    string
 	Language string
+	// StripDiarization opts in to removing timestamp/speaker annotations from
+	// backends that return diarized transcripts. It is false by default so
+	// ordinary bracketed references are never rewritten.
+	StripDiarization bool
 }
 
 // OutputConfig controls how recognized text is delivered to the user.
@@ -108,6 +112,9 @@ func Load(path string) (Config, error) {
 		}
 		if v, ok := asr["language"]; ok {
 			cfg.ASR.Language = v
+		}
+		if v, ok := asr["strip_diarization"]; ok {
+			cfg.ASR.StripDiarization = v == "true"
 		}
 	}
 

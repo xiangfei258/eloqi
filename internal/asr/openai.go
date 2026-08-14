@@ -47,6 +47,12 @@ type OpenAIClientConfig struct {
 	// Zero means 60 seconds.
 	Timeout time.Duration
 
+	// StripDiarization enables removal of timestamp/speaker annotations from
+	// backends that return diarized transcripts. It is opt-in because many
+	// OpenAI-compatible backends return ordinary prose containing bracketed
+	// numbers such as "references[1]".
+	StripDiarization bool
+
 	// HTTPClient, when non-nil, is used for the transcription request.
 	// When nil, http.DefaultClient is used. Injecting a client with a
 	// custom Transport makes the client fully testable without a real
@@ -160,9 +166,9 @@ func (c *OpenAIClient) Finalize() (string, error) {
 		return "", err
 	}
 
-	// Diarization-capable backends interleave timestamp/speaker markers with
-	// the text; strip them so callers receive plain text.
-	text = stripDiarizationMarkers(text)
+	if cfg.StripDiarization {
+		text = stripDiarizationMarkers(text)
+	}
 
 	if handler != nil {
 		handler(platform.ASRResult{Text: text, Final: true})

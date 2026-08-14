@@ -23,3 +23,26 @@ func TestStripDiarizationMarkers(t *testing.T) {
 		})
 	}
 }
+
+func TestStripDiarizationMarkersPreservesOrdinaryBrackets(t *testing.T) {
+	tests := []string{
+		"参考文献[1]",
+		"数组下标[0]",
+		"版本[2] 和编号[12]",
+		"[S01] 这不是完整转写",
+	}
+	for _, in := range tests {
+		if got := stripDiarizationMarkers(in); got != in {
+			t.Errorf("stripDiarizationMarkers(%q) = %q, want unchanged", in, got)
+		}
+	}
+}
+
+func TestOpenAIDoesNotStripDiarizationByDefault(t *testing.T) {
+	c := NewOpenAIClient(OpenAIClientConfig{
+		Endpoint: "https://example.test", APIKey: "k", Model: "m",
+	})
+	if c.cfg.StripDiarization {
+		t.Fatal("StripDiarization must default to false")
+	}
+}

@@ -53,6 +53,7 @@ endpoint = "https://api.example.com/v1/audio/transcriptions"
 api_key = "sk-abc123"
 model = "whisper-large"
 language = "en-US"
+strip_diarization = true
 
 [output]
 auto_type = false
@@ -82,6 +83,9 @@ auto_type = false
 	}
 	if cfg.ASR.Language != "en-US" {
 		t.Fatalf("language = %q", cfg.ASR.Language)
+	}
+	if !cfg.ASR.StripDiarization {
+		t.Fatal("strip_diarization = false, want true")
 	}
 	if cfg.Output.AutoType {
 		t.Fatal("auto_type = true, want false")

@@ -5,21 +5,30 @@ import (
 	"strings"
 )
 
-// diarizationMarker matches the timestamp and speaker tokens that
-// diarization-capable recognizers (for example MOSS-Transcribe-Diarize)
-// interleave with the recognized text, e.g.:
+// diarizationTranscript recognizes a complete sequence of timestamped speaker
+// turns, for example:
 //
-//	[0.65][S01]你好你好，一二三。[2.12]
+//	[0.65][S01]你好，一二三。[2.12]
+//	[0.00][S01]第一句[1.00][1.00][S02]第二句[2.00]
 //
-// It matches both the [start]/[end] timestamps ([0.65], [2.12]) and the
-// speaker labels ([S01]), so they can be stripped before the text reaches the
-// caller.
+// Requiring the whole string to match prevents the cleanup from mangling
+// ordinary prose that merely contains a bracketed number, such as
+// "参考文献[1]".
+var diarizationTranscript = regexp.MustCompile(
+	`^(?:\[\d+(?:\.\d+)?\]\[[Ss]\d+\][^\[\]]*\[\d+(?:\.\d+)?\]){1,}$`,
+)
+
+// diarizationMarker matches one timestamp or speaker label inside a transcript
+// that has already passed the complete-structure validation above.
 var diarizationMarker = regexp.MustCompile(`\[\d+(?:\.\d+)?\]|\[[Ss]\d+\]`)
 
 // stripDiarizationMarkers removes timestamp and speaker markers from a
-// diarized transcription and collapses the surrounding whitespace, leaving
-// plain text.
+// validated diarized transcription. If the input is not a complete diarization
+// transcript, it is returned unchanged.
 func stripDiarizationMarkers(s string) string {
+	if !diarizationTranscript.MatchString(s) {
+		return s
+	}
 	out := diarizationMarker.ReplaceAllString(s, "")
 	return strings.Join(strings.Fields(out), " ")
 }

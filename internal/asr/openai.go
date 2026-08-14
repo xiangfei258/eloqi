@@ -160,6 +160,10 @@ func (c *OpenAIClient) Finalize() (string, error) {
 		return "", err
 	}
 
+	// Diarization-capable backends interleave timestamp/speaker markers with
+	// the text; strip them so callers receive plain text.
+	text = stripDiarizationMarkers(text)
+
 	if handler != nil {
 		handler(platform.ASRResult{Text: text, Final: true})
 	}

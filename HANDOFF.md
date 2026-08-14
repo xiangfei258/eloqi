@@ -65,19 +65,24 @@ P0 的逐条命令看 `P0_BRIEF.md`。
 
 - [x] 项目命名、许可证、module path 已定。
 - [x] 三份文档（设计蓝图 / 任务清单 / P0 简报）已写好，占位符已填充。
-- [ ] **P0（项目脚手架）尚未开始**——已交给 codex 执行。
-- [ ] 其余阶段（P1–P6）未开始。
-
-当前 `eloqi/` 目录只有三份文档，**还没有 `git init`、没有 `go.mod`、没有代码**。
+- [x] **P0 项目脚手架已完成**：git 已 init、首次提交已建立，工作区干净。
+- [x] **P1.1 平台能力接口 + mock 已完成**：见 `internal/platform/`（接口）与
+      `internal/platform/mock/`（mock），`go test -race ./...` 通过。
+- [ ] P1.2（Linux 平台实现）与 P1.3（最小闭环）未开始。
+- [ ] 其余阶段（P2–P6）未开始。
 
 ---
 
 ## 6. 下一步（接上后该做什么）
 
-1. 让 codex 读 `TASKS.md` + `P0_BRIEF.md`，执行 **P0**（git init → .gitignore → MIT LICENSE
-   → go mod init github.com/xiangchang24/eloqi → 目录骨架 → main.go → README → 首次提交）。
-2. P0 验收通过后，进入 **P1**：定义平台能力接口 + mock，打通 Linux 最小闭环。
+1. 对照 `TASKS.md` 的 **P1.2**：实现 Linux 平台能力（arecord 录音、OpenAI 兼容
+   非流式 ASR、wl-copy/wl-paste 剪贴板、wtype/XTest 上屏、evdev/X11 热键）。
+2. 然后 **P1.3**：串起“按下热键 → 录音 → 识别 → 输出”的最小闭环。
 3. 之后按 P2 → P3 → … 推进，每阶段对照 `TASKS.md` 的验收标准。
+
+> 环境提示：本机 Go 默认 `GOCACHE`/`GOMODCACHE` 位于 `/home/xiangchanglin/...`，
+> 在受限 shell 下只读；构建前先 `export GOCACHE="$PWD/.buildcache"
+> GOMODCACHE="$PWD/.buildcache/mod"`（该目录已被 .gitignore 忽略）。
 
 ---
 

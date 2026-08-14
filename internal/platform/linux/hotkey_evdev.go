@@ -5,9 +5,11 @@ package linux
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/xiangchang24/eloqi/internal/platform"
 )
@@ -24,6 +26,13 @@ const (
 // inputEventSize is the size of struct input_event on 64-bit Linux: two
 // 8-byte timeval fields + 2-byte type + 2-byte code + 4-byte value = 24.
 const inputEventSize = 24
+
+// modifierOnlySettleDelay is the observation window used before a
+// modifier-only binding commits. If another non-modifier key arrives inside
+// the window (for example Tab while the user is typing Alt+Super+Tab), the
+// candidate is discarded. This is a pragmatic compromise: an observation-only
+// input stream cannot prove that the user will never press another key.
+const modifierOnlySettleDelay = 150 * time.Millisecond
 
 // evdevModMap maps evdev key codes to modifier bits. Both left and right
 // variants map to the same modifier.
@@ -66,9 +75,7 @@ type rawEvent struct {
 	value int32
 }
 
-// evdevHotkey implements platform.Hotkey using the Linux evdev interface. It
-// opens all /dev/input/event* devices, reads key events, tracks modifier
-// state, and matches registered hotkey combos.
+// evdevHotkey implements platform.Hotkey using the Linux evdev interface.
 type evdevHotkey struct {
 	mu         sync.Mutex
 	registered map[platform.Key]bool
@@ -161,9 +168,9 @@ func (h *evdevHotkey) Close() error {
 	h.closed = true
 	h.mu.Unlock()
 
-	close(h.done) // unblock reader goroutines waiting on send
+	close(h.done)
 	for _, f := range h.files {
-		f.Close() // unblock f.Read
+		f.Close()
 	}
 	h.wg.Wait()
 	close(h.events)
@@ -177,12 +184,8 @@ func (h *evdevHotkey) readDevice(f *os.File) {
 	defer h.wg.Done()
 	buf := make([]byte, inputEventSize)
 	for {
-		n, err := f.Read(buf)
-		if err != nil {
+		if _, err := io.ReadFull(f, buf); err != nil {
 			return
-		}
-		if n < inputEventSize {
-			continue
 		}
 		typ := binary.LittleEndian.Uint16(buf[16:18])
 		if typ != evKey {
@@ -201,13 +204,28 @@ func (h *evdevHotkey) readDevice(f *os.File) {
 	}
 }
 
-// processEvents consumes raw evdev events, tracks modifier state, and emits
-// platform.KeyEvent values for registered combos.
+// processEvents serializes raw events, modifier state and edge emission. All
+// mutable state below is owned by this goroutine, which avoids lock-order
+// issues around channel sends.
 func (h *evdevHotkey) processEvents() {
 	defer h.wg.Done()
 
 	var modState platform.Modifiers
-	activeModOnly := make(map[platform.Key]bool)
+	activeCode := make(map[uint16]platform.Key)   // physical key -> binding
+	activeModOnly := make(map[platform.Key]bool)  // committed modifier-only binding
+	pending := make(map[platform.Key]*time.Timer) // settle-window candidates
+	committed := make(chan platform.Key, 16)
+
+	stopAllTimers := func() {
+		for _, timer := range pending {
+			timer.Stop()
+		}
+	}
+	defer stopAllTimers()
+
+	handle := func(raw rawEvent) {
+		h.handleRawEvent(raw, &modState, activeCode, activeModOnly, pending, committed)
+	}
 
 	for {
 		select {
@@ -215,15 +233,35 @@ func (h *evdevHotkey) processEvents() {
 			if !ok {
 				return
 			}
-			h.handleRawEvent(raw, &modState, activeModOnly)
+			handle(raw)
+		case key := <-committed:
+			// The timer may have raced with a cancellation; verify the state
+			// again before emitting the press edge.
+			h.mu.Lock()
+			registered := h.registered[key]
+			h.mu.Unlock()
+			if timer, ok := pending[key]; ok && registered && !activeModOnly[key] && key.Mods == modState {
+				timer.Stop()
+				delete(pending, key)
+				activeModOnly[key] = true
+				h.emit(platform.KeyEvent{Key: key, Pressed: true})
+			}
 		case <-h.done:
+			stopAllTimers()
 			return
 		}
 	}
 }
 
 // handleRawEvent processes a single raw evdev key event.
-func (h *evdevHotkey) handleRawEvent(raw rawEvent, modState *platform.Modifiers, activeModOnly map[platform.Key]bool) {
+func (h *evdevHotkey) handleRawEvent(
+	raw rawEvent,
+	modState *platform.Modifiers,
+	activeCode map[uint16]platform.Key,
+	activeModOnly map[platform.Key]bool,
+	pending map[platform.Key]*time.Timer,
+	committed chan platform.Key,
+) {
 	pressed := raw.value == keyPress
 
 	if mod, ok := evdevModMap[raw.code]; ok {
@@ -232,48 +270,124 @@ func (h *evdevHotkey) handleRawEvent(raw rawEvent, modState *platform.Modifiers,
 		} else {
 			*modState &^= mod
 		}
-		h.checkModOnlyCombos(*modState, activeModOnly, pressed)
+		h.afterModifierChange(*modState, activeCode, activeModOnly, pending, committed)
 		return
 	}
+
+	// Any non-modifier key invalidates an uncommitted or active modifier-only
+	// chord. This covers the common fast Alt+Super followed immediately by Tab
+	// case without making ordinary Ctrl+F1 bindings impossible.
+	if len(activeModOnly) != 0 || len(pending) != 0 {
+		h.releaseAllModOnly(activeModOnly, pending)
+	}
+	h.releaseRegularWithChangedMods(*modState, activeCode)
 
 	code, ok := evdevKeyMap[raw.code]
 	if !ok {
 		return
 	}
 	key := platform.Key{Mods: *modState, Code: code}
+
 	h.mu.Lock()
 	registered := h.registered[key]
 	h.mu.Unlock()
-	if registered {
-		select {
-		case h.events <- platform.KeyEvent{Key: key, Pressed: pressed}:
-		case <-h.done:
+	if !registered {
+		return
+	}
+
+	// Pair release with the original press binding, not with the modifier
+	// state at release time. If Ctrl is released before F1, the F1 release
+	// still closes the Ctrl+F1 edge.
+	if !pressed {
+		if binding, active := activeCode[raw.code]; active {
+			delete(activeCode, raw.code)
+			h.emit(platform.KeyEvent{Key: binding, Pressed: false})
+		}
+		return
+	}
+	if _, active := activeCode[raw.code]; active {
+		return
+	}
+	activeCode[raw.code] = key
+	h.emit(platform.KeyEvent{Key: key, Pressed: true})
+}
+
+// afterModifierChange releases bindings whose exact modifier set no longer
+// holds and starts (or cancels) modifier-only settle candidates.
+func (h *evdevHotkey) afterModifierChange(
+	mods platform.Modifiers,
+	activeCode map[uint16]platform.Key,
+	activeModOnly map[platform.Key]bool,
+	pending map[platform.Key]*time.Timer,
+	committed chan platform.Key,
+) {
+	h.releaseRegularWithChangedMods(mods, activeCode)
+
+	h.mu.Lock()
+	keys := make([]platform.Key, 0, len(h.registered))
+	for key := range h.registered {
+		keys = append(keys, key)
+	}
+	h.mu.Unlock()
+
+	for _, key := range keys {
+		if key.Code != platform.KeyNone {
+			continue
+		}
+		if key.Mods == mods {
+			if !activeModOnly[key] {
+				if _, waiting := pending[key]; !waiting {
+					pending[key] = time.AfterFunc(modifierOnlySettleDelay, func() {
+						select {
+						case committed <- key:
+						case <-h.done:
+						}
+					})
+				}
+			}
+			continue
+		}
+		if activeModOnly[key] {
+			delete(activeModOnly, key)
+			h.emit(platform.KeyEvent{Key: key, Pressed: false})
+		}
+		if timer, waiting := pending[key]; waiting {
+			timer.Stop()
+			delete(pending, key)
 		}
 	}
 }
 
-// checkModOnlyCombos checks whether any registered modifier-only combo matches
-// the current modifier state and emits press/release events accordingly.
-func (h *evdevHotkey) checkModOnlyCombos(mods platform.Modifiers, active map[platform.Key]bool, pressed bool) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for key := range h.registered {
-		if key.Code != platform.KeyNone {
-			continue
+// releaseRegularWithChangedMods releases ordinary bindings whose exact
+// modifier set has changed.
+func (h *evdevHotkey) releaseRegularWithChangedMods(mods platform.Modifiers, activeCode map[uint16]platform.Key) {
+	for physical, binding := range activeCode {
+		if binding.Mods != mods {
+			delete(activeCode, physical)
+			h.emit(platform.KeyEvent{Key: binding, Pressed: false})
 		}
-		matches := key.Mods == mods
-		if matches && !active[key] && pressed {
-			active[key] = true
-			select {
-			case h.events <- platform.KeyEvent{Key: key, Pressed: true}:
-			case <-h.done:
-			}
-		} else if !matches && active[key] {
-			active[key] = false
-			select {
-			case h.events <- platform.KeyEvent{Key: key, Pressed: false}:
-			case <-h.done:
-			}
+	}
+}
+
+// releaseAllModOnly immediately discards modifier-only candidates and closes
+// active modifier-only edges.
+func (h *evdevHotkey) releaseAllModOnly(active map[platform.Key]bool, pending map[platform.Key]*time.Timer) {
+	for key := range pending {
+		if timer := pending[key]; timer != nil {
+			timer.Stop()
 		}
+		delete(pending, key)
+	}
+	for key := range active {
+		delete(active, key)
+		h.emit(platform.KeyEvent{Key: key, Pressed: false})
+	}
+}
+
+// emit sends an event unless the hotkey is shutting down.
+func (h *evdevHotkey) emit(ev platform.KeyEvent) {
+	select {
+	case h.events <- ev:
+	case <-h.done:
 	}
 }

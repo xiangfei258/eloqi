@@ -12,21 +12,28 @@ import (
 )
 
 // ArecordRecorder captures raw mono PCM audio by launching the external
-// arecord(1) utility (ALSA). It reads 16 kHz / 16-bit / mono raw PCM from
-// arecord's stdout.
+// arecord(1) utility (ALSA). An internal pump goroutine copies arecord's
+// stdout into a bounded buffer, which makes Stop safe to call while a Read is
+// blocked and lets the recorder honor the interface's "Read returns io.EOF
+// after Stop" contract.
 type ArecordRecorder struct {
-	mu sync.Mutex
-
 	rate   int
 	chans  int
 	bits   int
 	device string
 
-	cmd     *exec.Cmd
-	stdout  io.ReadCloser
-	started bool
-	stopped bool
-	closed  bool
+	// lifecycle is guarded by mu. cmd is written only during Start, before any
+	// Read or Stop caller can observe the recorder as started.
+	mu       sync.Mutex
+	cond     *sync.Cond
+	cmd      *exec.Cmd
+	started  bool
+	stopping bool
+	stopDone bool
+	closed   bool
+	buffer   []byte
+
+	pumpWG sync.WaitGroup
 }
 
 var _ platform.Recorder = (*ArecordRecorder)(nil)
@@ -34,15 +41,19 @@ var _ platform.Recorder = (*ArecordRecorder)(nil)
 // NewRecorder returns a Recorder that uses arecord with the default capture
 // parameters (16 kHz / 16-bit / mono).
 func NewRecorder() *ArecordRecorder {
-	return &ArecordRecorder{
+	r := &ArecordRecorder{
 		rate:  platform.DefaultSampleRate,
 		chans: platform.DefaultChannels,
 		bits:  platform.DefaultBitDepth,
 	}
+	r.cond = sync.NewCond(&r.mu)
+	return r
 }
 
 // WithDevice sets the ALSA capture device (e.g. "default", "hw:0,0").
 func (r *ArecordRecorder) WithDevice(device string) *ArecordRecorder {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.device = device
 	return r
 }
@@ -51,6 +62,9 @@ func (r *ArecordRecorder) WithDevice(device string) *ArecordRecorder {
 func (r *ArecordRecorder) Start() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.closed {
+		return errors.New("linux recorder: closed")
+	}
 	if r.started {
 		return errors.New("linux recorder: already started")
 	}
@@ -77,81 +91,141 @@ func (r *ArecordRecorder) Start() error {
 	}
 
 	r.cmd = cmd
-	r.stdout = stdout
 	r.started = true
+	r.stopDone = false
+	r.pumpWG.Add(1)
+	go r.pump(stdout)
 	return nil
 }
 
-// Read reads the next chunk of captured PCM from arecord's stdout. It blocks
-// until data is available or the recorder is stopped.
+// Read blocks until PCM data is available, the recorder stops, or the stream
+// ends. It implements the platform.Recorder lifecycle contract.
 func (r *ArecordRecorder) Read(p []byte) (int, error) {
-	r.mu.Lock()
-	stdout := r.stdout
-	r.mu.Unlock()
-	if stdout == nil {
-		return 0, errors.New("linux recorder: not started")
-	}
-	n, err := stdout.Read(p)
-	if err == io.EOF && n == 0 {
-		return 0, io.EOF
-	}
-	return n, err
-}
-
-// Stop terminates arecord and returns any buffered samples remaining in the
-// stdout pipe.
-func (r *ArecordRecorder) Stop() ([]byte, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.started {
-		return nil, errors.New("linux recorder: not started")
+		return 0, errors.New("linux recorder: not started")
 	}
-	r.stopped = true
-
-	// Signal arecord to stop so it flushes remaining samples.
-	if r.cmd != nil && r.cmd.Process != nil {
-		_ = r.cmd.Process.Signal(sigInterrupt)
+	if r.closed {
+		return 0, io.EOF
 	}
 
-	// Drain any remaining buffered data from the pipe.
-	var tail []byte
-	if r.stdout != nil {
-		buf := make([]byte, 4096)
-		for {
-			n, err := r.stdout.Read(buf)
-			if n > 0 {
-				tail = append(tail, buf[:n]...)
-			}
-			if err != nil {
-				break
-			}
-		}
+	for len(r.buffer) == 0 && !r.stopDone {
+		r.cond.Wait()
+	}
+	if len(r.buffer) == 0 {
+		return 0, io.EOF
 	}
 
-	// Wait for the process to exit.
-	if r.cmd != nil {
-		_ = r.cmd.Wait()
+	n := len(p)
+	if n > len(r.buffer) {
+		n = len(r.buffer)
 	}
-	return tail, nil
+	copy(p, r.buffer[:n])
+	r.buffer = r.buffer[n:]
+	r.cond.Signal()
+	return n, nil
 }
 
-// Close releases resources. It kills the arecord process if still running and
-// is idempotent.
-func (r *ArecordRecorder) Close() error {
+// Stop asks arecord to flush and exit, waits for its stdout to drain, and
+// returns the PCM samples that have not yet been consumed by Read. Stop may be
+// called while another goroutine is blocked in Read; both calls are then
+// coordinated through the internal condition variable.
+func (r *ArecordRecorder) Stop() ([]byte, error) {
+	r.mu.Lock()
+	if !r.started {
+		defer r.mu.Unlock()
+		return nil, errors.New("linux recorder: not started")
+	}
+	cmd := r.cmd
+	r.stopping = true
+	r.cond.Broadcast()
+	r.mu.Unlock()
+
+	// SIGINT makes arecord flush its buffers and exit cleanly. This unblocks
+	// the pump if it is waiting for more microphone data.
+	if cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Signal(sigInterrupt)
+	}
+	r.pumpWG.Wait()
+	_ = cmd.Wait()
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.stopDone {
+		// A prior Stop consumed the remaining buffer. This call is a harmless
+		// lifecycle retry.
+		return nil, nil
+	}
+	remaining := r.buffer
+	r.buffer = nil
+	r.stopDone = true
+	r.cond.Broadcast()
+	return remaining, nil
+}
+
+// Close releases resources. It terminates arecord if still running and is
+// idempotent.
+func (r *ArecordRecorder) Close() error {
+	r.mu.Lock()
 	if r.closed {
+		r.mu.Unlock()
 		return nil
 	}
+	cmd := r.cmd
+	running := r.started && !r.stopDone
 	r.closed = true
-	if r.cmd != nil && r.cmd.Process != nil {
-		_ = r.cmd.Process.Kill()
-		_ = r.cmd.Wait()
+	r.cond.Broadcast()
+	r.mu.Unlock()
+
+	if running && cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Kill()
 	}
-	if r.stdout != nil {
-		_ = r.stdout.Close()
+	if running {
+		r.pumpWG.Wait()
+		_ = cmd.Wait()
 	}
+
+	r.mu.Lock()
+	r.buffer = nil
+	r.cond.Broadcast()
+	r.mu.Unlock()
 	return nil
+}
+
+// pump owns arecord's stdout and appends every captured chunk to the recorder
+// buffer. The buffer is capped so a caller that never reads cannot grow memory
+// without bound while recording.
+func (r *ArecordRecorder) pump(stdout io.ReadCloser) {
+	defer r.pumpWG.Done()
+	defer stdout.Close()
+
+	buf := make([]byte, 4096)
+	for {
+		n, err := stdout.Read(buf)
+		if n > 0 {
+			chunk := append([]byte(nil), buf[:n]...)
+			r.mu.Lock()
+			for len(r.buffer)+len(chunk) > 1<<20 && !r.closed && !r.stopping {
+				// Wait for Read to consume space. Stop and Close broadcast on
+				// this condition, so shutdown cannot deadlock when no reader is
+				// draining the buffer.
+				r.cond.Wait()
+			}
+			if !r.closed && !r.stopping {
+				r.buffer = append(r.buffer, chunk...)
+			}
+			r.cond.Broadcast()
+			r.mu.Unlock()
+		}
+		if err != nil {
+			r.mu.Lock()
+			r.stopDone = true
+			r.cond.Broadcast()
+			r.mu.Unlock()
+			return
+		}
+	}
 }
 
 // itoa is a local int-to-string helper to avoid a strconv import in this file.

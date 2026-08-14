@@ -7,7 +7,7 @@
 ## 状态
 
 - [x] P0 项目骨架
-- [ ] P1 Linux 最小闭环（代码已完成，待真机验证）
+- [x] P1 Linux 最小闭环
 - [ ] P2 状态机与健壮性
 - [ ] P3 macOS / Windows
 - [ ] P4 TUI + 配置热重载 + doctor

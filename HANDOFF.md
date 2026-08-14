@@ -72,20 +72,18 @@ P0 的逐条命令看 `P0_BRIEF.md`。
       （`internal/platform/linux/`）、OpenAI 非流式 ASR（`internal/asr/`）、TOML 配置
       （`internal/config/`）、voice 最小闭环（`internal/voice/`）、装配（`internal/app/`）。
       build/vet/`go test -race` 全绿。
-- [ ] **P1 真机验证未做**：录音/热键/剪贴板/上屏依赖真实设备与显示服务器，需人工验证。
+- [x] **P1 真机验证通过（2026-08-14）**：GNOME Wayland，热键 `Alt+Super` toggle，
+      本机 sglang-omni 转写，识别文本写入剪贴板。已知限制：GNOME Wayland 下 `wtype`
+      自动上屏不可用，当前为剪贴板模式（手动 Ctrl+V）。
 - [ ] 其余阶段（P2–P6）未开始。
 
 ---
 
 ## 6. 下一步（接上后该做什么）
 
-1. **P1 真机验证**（人工）：准备 `eloqi.toml`（热键、ASR endpoint/api_key/model），
-   在 Wayland 或 X11 桌面按热键说话，确认文本写入剪贴板/上屏。依赖：`arecord`、
-   `wl-clipboard` 或 `xclip`、`wtype` 或 `xdotool`；Wayland 热键需用户加入 `input` 组，
-   X11 构建需 `libx11-dev`。
-2. 真机验证通过后进入 **P2**：显式状态机（idle/connecting/recording/stopping_delayed/
-   stopping/error）+ 停止延迟缓冲 + 双输出防重 + 停止异步化，并补齐状态机转移单测。
-3. 之后按 P3 → P4 → … 推进，每阶段对照 `TASKS.md` 的验收标准。
+1. 进入 **P2**：显式状态机（idle/connecting/recording/stopping_delayed/stopping/error）
+   + 停止延迟缓冲 + 双输出防重 + 停止异步化，并补齐状态机全部转移的单测。
+2. 之后按 P3 → P4 → … 推进，每阶段对照 `TASKS.md` 的验收标准。
 
 > 环境提示：本机 Go 默认 `GOCACHE`/`GOMODCACHE` 位于 `/home/xiangchanglin/...`，
 > 在受限 shell 下只读；构建前先 `export GOCACHE="$PWD/.buildcache"

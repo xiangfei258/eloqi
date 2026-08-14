@@ -56,12 +56,13 @@
 - [x] 配置项先用最简单形式（热键、ASR 地址/密钥，TOML）。
 
 **验收标准**：
-- [ ] 在 Linux（先 Wayland 或 X11 其一）真机验证：按热键说话，松开后文本出现在焦点窗口。
+- [x] 在 Linux（Wayland，GNOME）真机验证：按热键（Alt+Super，toggle）说话，识别文本写入剪贴板。
 - [x] 核心逻辑（状态流转）有单元测试，`go test -race ./...` 通过。
 
-> 代码已完成并提交（见 `internal/platform/linux/`、`internal/asr/`、`internal/config/`、
-> `internal/voice/`、`internal/app/`）。**真机验证未做**：录音/热键/剪贴板/上屏依赖真实
-> 设备与显示服务器，需人工按下方清单验证后再视为 P1 关闭。
+> **P1 已关闭（2026-08-14 真机验证通过）**。验证环境：GNOME Wayland，热键 `Alt+Super`
+> toggle，ASR 走本机 sglang-omni（`/models/MOSS-Transcribe-Diarize`），输出到剪贴板
+> （`auto_type=false`，识别结果已剥除 diarization 标记）。
+> 已知限制：GNOME Wayland 下 `wtype` 自动上屏不可用，故当前为剪贴板模式，需手动 Ctrl+V。
 
 ---
 

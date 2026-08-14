@@ -2,6 +2,7 @@ package voice
 
 import (
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -297,5 +298,227 @@ func TestDoublePressIgnored(t *testing.T) {
 
 	if h.resultText != "hello world" {
 		t.Fatalf("result = %q, want %q", h.resultText, "hello world")
+	}
+}
+
+func TestSendErrorIsNotMaskedByFinalizeText(t *testing.T) {
+	hk := mock.NewHotkey()
+	cb := &mock.Clipboard{}
+	rec := &mock.Recorder{Data: []byte{1, 2, 3}, ChunkSize: 1}
+	asr := &mock.ASRClient{
+		FinalText: "must not be reported as success",
+		SendErr:   errors.New("upload stream broken"),
+	}
+
+	resultCh := make(chan struct{}, 1)
+	var text string
+	var resultErr error
+	v := New(Config{
+		Hotkey:      hk,
+		NewRecorder: func() platform.Recorder { return rec },
+		NewASR:      func() platform.ASRClient { return asr },
+		Clipboard:   cb,
+		Key:         platform.Key{Mods: platform.ModCtrl, Code: "F1"},
+		Mode:        "hold",
+	})
+	v.OnResult = func(gotText string, err error) {
+		text, resultErr = gotText, err
+		select {
+		case resultCh <- struct{}{}:
+		default:
+		}
+	}
+	if err := v.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	hk.Emit(platform.KeyEvent{Key: platform.Key{Mods: platform.ModCtrl, Code: "F1"}, Pressed: true})
+	select {
+	case <-resultCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for send-error result")
+	}
+
+	if resultErr == nil {
+		t.Fatal("Send error must be propagated even when Finalize could succeed")
+	}
+	if text == "must not be reported as success" {
+		t.Fatal("text from Finalize should not be reported after Send failure")
+	}
+	if cb.WriteCount() != 0 {
+		t.Fatalf("clipboard writes = %d, want 0 after send failure", cb.WriteCount())
+	}
+}
+
+func TestOutputErrorIsPropagated(t *testing.T) {
+	hk := mock.NewHotkey()
+	wantErr := errors.New("clipboard unavailable")
+	cb := &mock.Clipboard{WriteErr: wantErr}
+	rec := &mock.Recorder{Data: []byte{1}}
+	asr := &mock.ASRClient{FinalText: "hello"}
+
+	resultCh := make(chan struct{}, 1)
+	var resultErr error
+	v := New(Config{
+		Hotkey:      hk,
+		NewRecorder: func() platform.Recorder { return rec },
+		NewASR:      func() platform.ASRClient { return asr },
+		Clipboard:   cb,
+		Key:         platform.Key{Mods: platform.ModCtrl, Code: "F1"},
+		Mode:        "hold",
+	})
+	v.OnResult = func(_ string, err error) {
+		resultErr = err
+		select {
+		case resultCh <- struct{}{}:
+		default:
+		}
+	}
+	if err := v.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	hk.Emit(platform.KeyEvent{Key: platform.Key{Mods: platform.ModCtrl, Code: "F1"}, Pressed: true})
+	hk.Emit(platform.KeyEvent{Key: platform.Key{Mods: platform.ModCtrl, Code: "F1"}, Pressed: false})
+	select {
+	case <-resultCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for output error")
+	}
+	if !errors.Is(resultErr, wantErr) {
+		t.Fatalf("result error = %v, want containing %v", resultErr, wantErr)
+	}
+}
+
+// slowASR blocks in Finalize until released, simulating a long upload/result
+// wait during session finalization.
+type slowASR struct {
+	entered  chan struct{}
+	release  chan struct{}
+	once     sync.Once
+	closeErr error
+}
+
+func (a *slowASR) Connect() error                          { return nil }
+func (a *slowASR) Send([]byte) error                       { return nil }
+func (a *slowASR) SetResultHandler(platform.ResultHandler) {}
+func (a *slowASR) Finalize() (string, error) {
+	a.once.Do(func() { close(a.entered) })
+	<-a.release
+	return "slow result", nil
+}
+func (a *slowASR) Close() error { return a.closeErr }
+
+func TestNewSessionWaitsForFinalization(t *testing.T) {
+	hk := mock.NewHotkey()
+	cb := &mock.Clipboard{}
+
+	recorders := make(chan *mock.Recorder, 2)
+	clients := make(chan *slowASR, 2)
+	created := make(chan *slowASR, 2)
+	for i := 0; i < 2; i++ {
+		recorders <- &mock.Recorder{Data: []byte{1}}
+		clients <- &slowASR{entered: make(chan struct{}), release: make(chan struct{})}
+	}
+
+	resultCh := make(chan string, 2)
+	v := New(Config{
+		Hotkey:      hk,
+		NewRecorder: func() platform.Recorder { return <-recorders },
+		NewASR: func() platform.ASRClient {
+			a := <-clients
+			created <- a
+			return a
+		},
+		Clipboard: cb,
+		Key:       platform.Key{Mods: platform.ModCtrl, Code: "F1"},
+		Mode:      "hold",
+	})
+	v.OnResult = func(text string, _ error) { resultCh <- text }
+	if err := v.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	key := platform.Key{Mods: platform.ModCtrl, Code: "F1"}
+	hk.Emit(platform.KeyEvent{Key: key, Pressed: true})
+	hk.Emit(platform.KeyEvent{Key: key, Pressed: false})
+	first := <-created
+	<-first.entered
+
+	// Try to start another while upload/finalize is still running. The second session must not begin yet.
+	hk.Emit(platform.KeyEvent{Key: key, Pressed: true})
+	select {
+	case second := <-created:
+		_ = second
+		t.Fatal("second ASR session started before first finalized")
+	case <-time.After(80 * time.Millisecond):
+	}
+
+	close(first.release)
+	select {
+	case got := <-resultCh:
+		if got != "slow result" {
+			t.Fatalf("first result = %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("first session did not finalize")
+	}
+
+	// Now the Voice has cleared current and may start a second session.
+	// OnResult fires just before runSession's deferred clear-current, so allow
+	// that scheduler step to complete.
+	time.Sleep(20 * time.Millisecond)
+	hk.Emit(platform.KeyEvent{Key: key, Pressed: true})
+	hk.Emit(platform.KeyEvent{Key: key, Pressed: false})
+	second := <-created
+	if second == nil {
+		t.Fatal("nil second ASR session")
+	}
+	<-second.entered
+	close(second.release)
+	select {
+	case got := <-resultCh:
+		if got != "slow result" {
+			t.Fatalf("second result = %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second session did not finalize")
+	}
+	v.Stop()
+}
+
+func TestStopWaitsForFinalization(t *testing.T) {
+	hk := mock.NewHotkey()
+	cb := &mock.Clipboard{}
+	asr := &slowASR{entered: make(chan struct{}), release: make(chan struct{})}
+	v := New(Config{
+		Hotkey:      hk,
+		NewRecorder: func() platform.Recorder { return &mock.Recorder{Data: []byte{1}} },
+		NewASR:      func() platform.ASRClient { return asr },
+		Clipboard:   cb,
+		Key:         platform.Key{Mods: platform.ModCtrl, Code: "F1"},
+		Mode:        "hold",
+	})
+	if err := v.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	hk.Emit(platform.KeyEvent{Key: platform.Key{Mods: platform.ModCtrl, Code: "F1"}, Pressed: true})
+	hk.Emit(platform.KeyEvent{Key: platform.Key{Mods: platform.ModCtrl, Code: "F1"}, Pressed: false})
+	<-asr.entered
+
+	stopped := make(chan struct{})
+	go func() { v.Stop(); close(stopped) }()
+	select {
+	case <-stopped:
+		t.Fatal("Stop returned before finalization completed")
+	case <-time.After(80 * time.Millisecond):
+	}
+
+	close(asr.release)
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not return after finalization")
 	}
 }

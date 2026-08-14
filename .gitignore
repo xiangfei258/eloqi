@@ -1,0 +1,22 @@
+# Build outputs
+/build/
+/dist/
+*.exe
+/eloqi
+.buildcache/
+
+# Local runtime files
+*.log
+*.tmp
+
+# Local configuration and state
+config.toml
+.env
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+
+# Agent harness
+.agents/
+.codex/

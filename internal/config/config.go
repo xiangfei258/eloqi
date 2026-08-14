@@ -66,7 +66,7 @@ func Defaults() Config {
 		Output: OutputConfig{
 			AutoType: true,
 		},
-	}
+	}.Normalize()
 }
 
 // Load reads and parses a TOML configuration file, applying defaults for any
@@ -124,7 +124,18 @@ func Load(path string) (Config, error) {
 		}
 	}
 
-	return cfg, nil
+	return cfg.Normalize(), nil
+}
+
+// Normalize trims and lowercases mode and applies the default mode when a
+// caller leaves it empty. Validation and runtime comparisons then use exactly
+// the same representation.
+func (c Config) Normalize() Config {
+	c.Hotkey.Mode = strings.ToLower(strings.TrimSpace(c.Hotkey.Mode))
+	if c.Hotkey.Mode == "" {
+		c.Hotkey.Mode = "hold"
+	}
+	return c
 }
 
 // ParseModifiers converts a +-separated modifier string (e.g. "Ctrl+Alt") into

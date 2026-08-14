@@ -12,6 +12,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -130,6 +131,10 @@ type Voice struct {
 
 // New creates a Voice from the given config.
 func New(cfg Config) *Voice {
+	mode := strings.ToLower(strings.TrimSpace(cfg.Mode))
+	if mode == "" {
+		mode = "hold"
+	}
 	return &Voice{
 		hotkey:      cfg.Hotkey,
 		newRecorder: cfg.NewRecorder,
@@ -137,7 +142,7 @@ func New(cfg Config) *Voice {
 		clipboard:   cfg.Clipboard,
 		autotype:    cfg.Autotype,
 		key:         cfg.Key,
-		mode:        cfg.Mode,
+		mode:        mode,
 		autoType:    cfg.AutoType,
 	}
 }

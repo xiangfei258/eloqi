@@ -240,3 +240,22 @@ func TestValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadNormalizesModeCaseAndWhitespace(t *testing.T) {
+	path := writeTempTOML(t, `
+[asr]
+endpoint = "https://x"
+api_key = "k"
+model = "m"
+
+[hotkey]
+mode = "  Toggle  "
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Hotkey.Mode != "toggle" {
+		t.Fatalf("mode = %q, want toggle", cfg.Hotkey.Mode)
+	}
+}

@@ -57,12 +57,7 @@ func Run() int {
 	defer caps.hotkey.Close()
 
 	asrFactory := func() platform.ASRClient {
-		return asr.NewOpenAIClient(asr.OpenAIClientConfig{
-			Endpoint: cfg.ASR.Endpoint,
-			APIKey:   cfg.ASR.APIKey,
-			Model:    cfg.ASR.Model,
-			Language: cfg.ASR.Language,
-		})
+		return asr.NewOpenAIClient(asrConfigFromConfig(cfg))
 	}
 
 	v := voice.New(voice.Config{
@@ -104,6 +99,19 @@ func Run() int {
 	log.Println("shutting down...")
 	v.Stop()
 	return 0
+}
+
+// asrConfigFromConfig converts the user-facing configuration into the ASR
+// client's constructor options. It is a separate function so tests can lock
+// the config-to-client wiring without starting the full application.
+func asrConfigFromConfig(cfg config.Config) asr.OpenAIClientConfig {
+	return asr.OpenAIClientConfig{
+		Endpoint:         cfg.ASR.Endpoint,
+		APIKey:           cfg.ASR.APIKey,
+		Model:            cfg.ASR.Model,
+		Language:         cfg.ASR.Language,
+		StripDiarization: cfg.ASR.StripDiarization,
+	}
 }
 
 // defaultConfigPath returns the default configuration file location.

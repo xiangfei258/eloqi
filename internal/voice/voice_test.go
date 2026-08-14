@@ -522,3 +522,19 @@ func TestStopWaitsForFinalization(t *testing.T) {
 		t.Fatal("Stop did not return after finalization")
 	}
 }
+
+func TestVoiceNormalizesModeCase(t *testing.T) {
+	hk := mock.NewHotkey()
+	cb := &mock.Clipboard{}
+	v := New(Config{
+		Hotkey:      hk,
+		NewRecorder: func() platform.Recorder { return &mock.Recorder{Data: []byte{1}} },
+		NewASR:      func() platform.ASRClient { return &mock.ASRClient{FinalText: "ok"} },
+		Clipboard:   cb,
+		Key:         platform.Key{Mods: platform.ModCtrl, Code: "F1"},
+		Mode:        "HOLD",
+	})
+	if v.mode != "hold" {
+		t.Fatalf("runtime mode = %q, want hold", v.mode)
+	}
+}

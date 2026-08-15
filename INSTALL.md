@@ -108,9 +108,9 @@ No external clipboard or audio command is required. On first use, grant permissi
 - Accessibility / 辅助功能权限；
 - Input Monitoring if macOS requests it for the CGEventTap hotkey / 若系统为 CGEventTap 热键请求，则授予输入监控权限。
 
-The native macOS bridge has not yet been compiled in this development cycle with a real macOS SDK. Treat the command above as the required acceptance step, not a previously confirmed result.
+The native macOS bridge has passed build, vet, and race tests with real macOS SDKs on GitHub-hosted Intel and Apple Silicon runners. The command above and the hardware checklist are still required on each target machine before real use.
 
-本轮开发尚未用真实 macOS SDK 编译原生桥；上面的命令属于待执行验收步骤，不是已经确认的结果。
+原生 macOS 桥已在 GitHub 托管的 Intel 与 Apple Silicon runner 上用真实 SDK 通过 build、vet、race；每台目标真机仍须执行上面的命令与硬件清单后才能投入使用。
 
 ## 4. Windows
 
@@ -259,6 +259,6 @@ Each platform archive has one top-level directory and preserves `docs/`; it incl
 
 每个平台归档都保留一个顶层目录和 `docs/` 层级，包含二进制、配置示例、LICENSE、THIRD_PARTY_NOTICES、双语 README、INSTALL、CHANGELOG、TASKS、ELOQUI_DESIGN 与真机清单。
 
-The current repository remote is Gitee, so these GitHub Actions do not run there. A GitHub repository or mirror, a green CI run, a real tag publication, checksum verification, and the manual device checklist are all still required before calling the release pipeline accepted.
+The Gitee `origin` is mirrored to [`xiangfei258/eloqi`](https://github.com/xiangfei258/eloqi), where [CI run `31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) passed. A real tag publication, downloaded checksum verification, and the manual device checklist are still required before calling the release pipeline accepted.
 
-当前仓库远端是 Gitee，无法直接运行这些 GitHub Actions。发布流水线要验收，仍需 GitHub 仓库或镜像、绿色 CI、真实 tag 发布、校验和核对以及真机回归。
+Gitee `origin` 已镜像到 [`xiangfei258/eloqi`](https://github.com/xiangfei258/eloqi)，CI run [`31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) 已全绿。发布流水线要完整验收，仍需真实 tag 发布、下载后校验和核对以及真机回归。

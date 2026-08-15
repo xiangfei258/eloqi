@@ -4,7 +4,7 @@
 
 Eloqui 是用 Go 编写的跨平台桌面语音输入工具：按下全局热键开始录音，由 OpenAI 兼容的语音转文字接口完成识别，再把结果写入剪贴板或粘贴到当前聚焦的应用中。
 
-> Eloqui 仍处于开发阶段。P2–P5 的实现和自动化覆盖已经落地，但 macOS 原生 Objective-C/cgo 桥接、P2–P5 全部真机回归、远端 CI 以及 tag 发布尚未验收。把任何平台用于正式工作前，请先看下方“验证状态”。
+> Eloqui 仍处于开发阶段。P2–P5 的实现和跨平台 CI 已经落地，但剩余真机回归与 tag 发布尚未验收。把任何平台用于正式工作前，请先看下方“验证状态”。
 
 ## 主要能力
 
@@ -23,8 +23,8 @@ Eloqui 是用 Go 编写的跨平台桌面语音输入工具：按下全局热键
 |---|---|---|
 | Linux | 已在 Linux + Xvfb 下通过全仓 build/vet/race 和 golangci-lint；voice、app 热重载与 X11 还做过定向重复 race。 | Wayland 与 X11 真机回归，包括麦克风、热键、剪贴板、自动上屏和 overlay。 |
 | Windows | 本机已通过 `windows/amd64` 全仓 build、vet、test 和 golangci-lint；完成定向 `386` 测试和 `arm64` 平台包/主程序交叉编译。 | Windows 真机端到端、权限与视觉回归。 |
-| macOS | 平台源码已实现；不依赖 cgo 的辅助逻辑测试已为 amd64/arm64 交叉编译。 | 必须在带 macOS SDK 的机器上编译 Objective-C/cgo 原生桥，并分别做 Intel/Apple Silicon 真机回归。 |
-| CI 与发布 | GitHub Actions CI/Release 工作流、actionlint、本地 Linux/Windows 归档 smoke 和文档链接检查均已通过。 | 当前 `origin` 是 Gitee，不会执行 `.github/workflows`；需同步到 GitHub 仓库或镜像后验证。远端 CI 全绿与 `v*` tag 发布均尚未发生。 |
+| macOS | 原生 Objective-C/cgo build、vet、race 已在 GitHub 托管的 macOS Intel 与 Apple Silicon runner 上通过。 | 分别完成 Intel/Apple Silicon 的权限、麦克风、热键、剪贴板、自动上屏与 overlay 真机回归。 |
+| CI 与发布 | [GitHub CI run `31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) 已在 Linux、Windows、macOS Intel、macOS Apple Silicon 与 Linux lint 全绿；actionlint、本地归档 smoke 和文档链接检查也已通过。 | 真实 `v*` 预发布、下载归档/校验和核对及剩余真机清单。 |
 
 自动化测试不能替代桌面真机验收。完整步骤见 [docs/REAL_DEVICE_CHECKLIST.zh-CN.md](docs/REAL_DEVICE_CHECKLIST.zh-CN.md)。
 
@@ -141,7 +141,7 @@ GitHub 工作流目前配置为：
 - `v*` tag 构建 Linux amd64、macOS amd64/arm64、Windows amd64 归档；
 - 随 GitHub Release 发布 `SHA256SUMS`。
 
-工作流文件只是发布基础设施，不代表已有可用发布。必须先在 GitHub 成功执行，再完成真机清单，才能作为发布验收证据。
+CI 工作流已由 [run `31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) 验证；tag 驱动的 Release 工作流与依赖硬件的真机清单仍是独立验收步骤。
 
 ## 许可证与原创性
 

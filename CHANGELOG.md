@@ -54,7 +54,7 @@ This file follows the structure of [Keep a Changelog](https://keepachangelog.com
 - Windows amd64 full build/vet/test passed; focused 386 tests and an arm64 platform-package cross-build passed.
 - Final Linux and Windows local golangci-lint runs reported `0 issues`; actionlint and repository Markdown-link checks passed.
 - Local Linux and Windows release-archive smoke tests passed version injection, required-asset layout, documentation-link, and SHA-256 verification.
-- The macOS cgo-free helper logic was cross-compiled for amd64 and arm64, but the Objective-C/cgo bridge has **not** yet been compiled with a real macOS SDK.
-- P2–P5 real-device regressions remain pending on Linux Wayland, Linux X11, macOS, and Windows.
-- The CI and release workflows have not run remotely. The current `origin` is Gitee, while the checked-in workflows require GitHub Actions.
+- The macOS Objective-C/cgo bridge passed native build, vet, and race tests on GitHub-hosted Intel and Apple Silicon macOS runners.
+- Linux Wayland has partial P2–P5 real-device evidence; its remaining fine-grained hotkey/auto-paste/visual checks and all Linux X11, macOS, and Windows real-device regressions remain pending.
+- GitHub CI run [`31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) passed on Linux, Windows, macOS Intel, and macOS Apple Silicon, plus Linux lint.
 - No `v*` tag release, archive download, or checksum verification has been accepted yet.

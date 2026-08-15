@@ -15,7 +15,7 @@
 | 许可证 | MIT，`Copyright (c) 2026 xiangchang24` |
 | 目标平台 | Linux Wayland、Linux X11、macOS、Windows |
 | 当前 Windows 工作区 | `D:\eloqi` |
-| 远端 | `origin = https://gitee.com/xiangchang24/eloqi.git` |
+| 远端 | `origin = https://gitee.com/xiangchang24/eloqi.git`（Gitee，上游）；`github = https://github.com/xiangfei258/eloqi.git`（Actions/Release 镜像） |
 | 主分支 | `master` |
 | 当前发布状态 | 尚无经过 CI、tag 和真机共同验收的正式发布 |
 
@@ -94,9 +94,9 @@ macOS 源码和当前边界：
 
 - CGEventTap、AudioQueue、NSPasteboard、Command+V、NSPanel helper 的 Objective-C/cgo 源码已存在。
 - 不依赖 cgo 的热键/overlay 状态逻辑已为 amd64/arm64 交叉编译。
-- **尚未在带 macOS SDK 的机器上编译 Objective-C/cgo 原生桥**，不得写成 macOS 构建通过。
+- GitHub Actions 已在 `macos-15-intel` 与 `macos-15`（Apple Silicon）真实 macOS SDK runner 上完成原生 Objective-C/cgo build、vet、race；这证明源码可构建，不等于热键、录音、权限或 overlay 真机通过。
 
-所有平台的 P3 真机闭环均待本轮统一清单执行。
+Linux Wayland 已有部分真机证据，但热键细粒度、自动上屏和 overlay 视觉仍未闭环；Linux X11、Windows 与 macOS 真机项尚未执行。
 
 ### P4
 
@@ -124,14 +124,14 @@ macOS 源码和当前边界：
 
 ### P6
 
-已落地但未完成远端验收：
+已落地；CI 已完成远端验收，tag 发布仍待执行：
 
 - `.github/workflows/ci.yml`：Linux/macOS/Windows build、vet、race，Linux Xvfb，golangci lint。
 - `.github/workflows/release.yml`：`v*` tag 构建 Linux amd64、macOS amd64/arm64、Windows amd64，归档并生成 `SHA256SUMS`，调用 `gh release`。
 - `.golangci.yml`、版本 `-ldflags -X main.appVersion=<tag>`、第三方许可证声明、双语 README、安装、CHANGELOG、配置示例和真机清单。
 - Actions 均固定到已核验 commit SHA；工作流默认 `contents: read`，只有 publish job 获得 `contents: write`，且 build/publish 受四个 runner 的 verify 与 Linux lint 门禁。
 
-关键边界：当前 `origin` 是 **Gitee**，不会运行 `.github/workflows`。需建立/同步 GitHub 仓库后再把 CI、Release 和 tag 任务勾为完成。当前没有远端 CI 全绿或真实 tag 发布证据。
+关键边界：Gitee 仍是 `origin`，另有 GitHub 镜像 [`xiangfei258/eloqi`](https://github.com/xiangfei258/eloqi)。CI run [`31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) 已全绿；尚无真实 tag 发布、发布资产下载或真机共同验收证据。
 
 ---
 
@@ -144,14 +144,13 @@ macOS 源码和当前边界：
 - Windows amd64：最终快照全仓 build/vet/test；Windows 全仓 golangci-lint 为 `0 issues`。
 - Windows 386：平台定向测试、checkptr 和 vet。
 - Windows arm64：平台测试包和主程序交叉编译。
-- macOS amd64/arm64：仅 cgo-free helper 交叉编译，不代表原生后端构建。
+- macOS amd64/arm64：除 cgo-free helper 交叉编译外，GitHub `macos-15-intel` 与 `macos-15` 已实际完成原生 Objective-C/cgo build、vet、race。
 - P6 静态/本地：actionlint v1.7.12 通过；仓库 11 份 Markdown 的 27 个本地链接无缺失；Linux/Windows 归档 smoke 的版本、资产、目录结构、归档内链接和 SHA-256 回验通过。
 - 2026-08-15 Linux 工作区独立复核：合并至 `97478b2` 后，Linux 全仓 build/vet/`go test -race` 与 Windows amd64 交叉编译（`CGO_ENABLED=0`）通过；macOS 交叉编译因 cgo/Objective-C 依赖无法在 Linux 完成，符合预期。
+- 2026-08-15 GitHub CI：run [`31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) 的 Ubuntu + Xvfb、Windows、macOS Intel、macOS Apple Silicon、Linux golangci-lint 全绿；首轮 Windows CRLF 格式失败已由 `.gitattributes` 修复。
 
 尚未确认：
 
-- macOS 原生 cgo build/vet/race。
-- GitHub 托管 runner 的三平台工作流。
 - tag 打包、Release 创建、下载和校验和核对。
 - P2–P5 真机清单。
 
@@ -188,10 +187,9 @@ Windows PowerShell 缓存写法见 `INSTALL.md`。macOS 原生代码只能在带
 
 ## 7. 下一步（按顺序）
 
-1. 建立或同步 GitHub 仓库，触发 CI；尤其确认 macOS Intel/Apple Silicon 的原生 Objective-C/cgo 编译与 race。
-2. 按 [docs/REAL_DEVICE_CHECKLIST.zh-CN.md](docs/REAL_DEVICE_CHECKLIST.zh-CN.md) 做 Linux Wayland、Linux X11、Windows、macOS 真机回归；用户已明确这些后续再执行，因此当前不要代填“通过”。
-3. CI 与真机问题修完后推测试 `v*` tag，核对四个归档、`eloqi --version`、Release notes 和 `SHA256SUMS`。
-4. 只有第 1–3 步闭合后，才把 P3/P6 和对应发布验收标为完成。
+1. 推送测试 `v*` 预发布 tag，核对四个归档、`eloqi --version`、Release notes 和 `SHA256SUMS`。
+2. 按 [docs/REAL_DEVICE_CHECKLIST.zh-CN.md](docs/REAL_DEVICE_CHECKLIST.zh-CN.md) 做 Linux Wayland、Linux X11、Windows、macOS 真机回归；当前只有 Linux Wayland 部分证据，不要代填其余“通过”。
+3. 只有 tag 发布与对应真机项闭合后，才把 P3/P6 和正式发布验收标为完成。
 
 ---
 
@@ -213,7 +211,7 @@ Windows PowerShell 缓存写法见 `INSTALL.md`。macOS 原生代码只能在带
 ## 9. 不要误报的事项
 
 - Xvfb、mock 或交叉编译不等于真机录音/热键/剪贴板/自动上屏/overlay 验收。
-- cgo-free darwin helper 编译不等于 macOS Objective-C/cgo 原生构建通过。
-- 工作流文件存在不等于 CI 全绿；Gitee origin 不会执行 GitHub Actions。
+- macOS 原生 CI 编译不等于 macOS 真机录音、热键、权限或 overlay 通过。
+- 工作流文件存在不等于 CI 全绿；应引用具体 GitHub run 作为证据。
 - Release YAML 存在不等于 tag 已发布或安装包可用。
 - doctor 的 warning 不代表权限已授权；必须由用户在系统设置中确认。

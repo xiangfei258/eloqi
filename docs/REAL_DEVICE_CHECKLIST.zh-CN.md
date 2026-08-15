@@ -317,15 +317,15 @@ Windows 专项：
 
 ## 9. P6 CI 与发布验收
 
-当前 `origin` 是 Gitee，以下步骤必须在同步后的 GitHub 仓库中执行。
+Gitee `origin` 已同步到 GitHub 镜像 [`xiangfei258/eloqi`](https://github.com/xiangfei258/eloqi)。以下 CI 项已由 run [`31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) 于 2026-08-15 验证。
 
 ### 9.1 CI
 
-- [ ] push/PR 触发 Linux、Windows、macOS Intel、macOS Apple Silicon job。
-- [ ] 四个 runner 的 gofmt、build、vet、race 全绿。
-- [ ] Linux 在 Xvfb 下通过显示相关测试。
-- [ ] golangci-lint job 全绿。
-- [ ] macOS job 确认实际编译 Objective-C/cgo，而不是跳过原生文件。
+- [x] push 触发 Linux、Windows、macOS Intel、macOS Apple Silicon job。
+- [x] 四个 runner 的 gofmt、build、vet、race 全绿。
+- [x] Linux 在 Xvfb 下通过显示相关测试。
+- [x] golangci-lint job 全绿。
+- [x] macOS job 实际启用 cgo 并编译 Objective-C 原生文件；Intel 与 Apple Silicon 均通过。
 
 ### 9.2 测试 tag
 
@@ -357,7 +357,7 @@ Linux X11：通过 / 失败 / 未执行
 Windows amd64：通过 / 失败 / 未执行
 macOS Intel：通过 / 失败 / 未执行
 macOS Apple Silicon：通过 / 失败 / 未执行
-GitHub CI：通过 / 失败 / 未执行
+GitHub CI：通过（run 31866448754，2026-08-15）
 测试 tag 发布：通过 / 失败 / 未执行
 
 遗留问题：

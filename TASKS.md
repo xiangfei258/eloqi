@@ -2,7 +2,7 @@
 
 > 配套文档：[ELOQUI_DESIGN.md](ELOQUI_DESIGN.md)（设计蓝图）。本文把蓝图拆成 P0–P6 可交付阶段。
 >
-> 勾选规则：只有“代码/文档已落地，并有当前工作区的本地自动化或可重复静态证据”才标为 `[x]`。真机、macOS 原生 SDK、远端 CI、tag 发布等未执行项即使已有代码或工作流，也保持 `[ ]`，避免把实现完成误写成验收完成。
+> 勾选规则：只有“代码/文档已落地，并有本地自动化、可重复静态证据或可追溯的远端运行证据”才标为 `[x]`。真机、tag 发布等未执行项即使已有代码或工作流，也保持 `[ ]`，避免把实现完成误写成验收完成。
 
 模块路径：`github.com/xiangchang24/eloqi`。
 
@@ -89,7 +89,7 @@
 
 目标：按 build tags 补齐三平台能力，同时保持已锁定接口不变。
 
-- [ ] macOS：CGEventTap、AudioQueue、NSPasteboard、Command+V 注入、NSPanel helper 的源码已实现；仍需真实 macOS SDK 编译，因此暂不勾选完成。
+- [x] macOS：CGEventTap、AudioQueue、NSPasteboard、Command+V 注入、NSPanel helper 的源码已实现，并在 macOS Intel/Apple Silicon 托管 runner 上完成原生 Objective-C/cgo build、vet、race；真机能力仍单独验收。
 - [x] Windows：GetAsyncKeyState + 观察式低级钩子、WinMM、Unicode 剪贴板、SendInput、非激活 Win32 overlay 已实现并通过本地自动化。
 - [x] Linux / macOS / Windows 后端通过 build tags 隔离，锁定平台接口未改名、未加方法、未删字段。
 - [x] Windows Unicode、音频格式/缓冲、热键边沿、原生符号和 overlay 状态测试。
@@ -99,8 +99,8 @@
 
 - [x] Linux 全仓 build/vet/race（Xvfb）通过。
 - [x] Windows amd64 全仓 build/vet/test 通过；定向 386 测试和 arm64 平台包/主程序交叉编译通过；WinMM 所有权失败、停止唤醒失败和有界 quarantine 路径已做重复故障注入与 checkptr 验证。
-- [ ] macOS Intel 原生 Objective-C/cgo build、vet、race（需要 macOS SDK）。
-- [ ] macOS Apple Silicon 原生 Objective-C/cgo build、vet、race（需要 macOS SDK）。
+- [x] macOS Intel 原生 Objective-C/cgo build、vet、race：GitHub Actions `macos-15-intel` 通过（run [`31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754)）。
+- [x] macOS Apple Silicon 原生 Objective-C/cgo build、vet、race：GitHub Actions `macos-15` 通过（run [`31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754)）。
 
 **真机验收**：
 
@@ -154,8 +154,8 @@
 
 ## P6 — 工程化与发布
 
-- [ ] 三平台 GitHub Actions CI 文件已编写，但当前 Gitee `origin` 不执行 `.github/workflows`，尚无远端运行证据。
-- [x] `.golangci.yml` 已添加；最终 Linux 与 Windows 本地全仓 `golangci-lint` 均为 `0 issues`（GitHub lint job 仍随远端 CI 待验收）。
+- [x] GitHub 镜像 [`xiangfei258/eloqi`](https://github.com/xiangfei258/eloqi) 已建立；Linux、Windows、macOS Intel、macOS Apple Silicon 的 build/vet/race 与 Linux lint 在 run [`31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) 全绿。
+- [x] `.golangci.yml` 已添加；Linux 与 Windows 本地全仓 `golangci-lint` 均为 `0 issues`，GitHub lint job 亦已通过。
 - [ ] `v*` tag 的 Linux amd64、macOS amd64/arm64、Windows amd64 打包与 `SHA256SUMS` 工作流已编写，尚未真实发布验证。
 - [x] `README.md` / `README.zh-CN.md`、`INSTALL.md`、`CHANGELOG.md`、配置示例、交接和真机清单已整理。
 - [x] 发布构建支持通过 `-ldflags -X main.appVersion=<tag>` 注入版本，本地构建显示 `dev`。
@@ -163,7 +163,7 @@
 
 **发布验收**：
 
-- [ ] 把仓库同步到 GitHub 后，三平台 CI 全绿。
+- [x] 仓库已同步到 GitHub，四个目标 runner 与 Linux lint 全绿（run [`31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754)）。
 - [ ] 推送测试 `v*` tag，确认四个归档、Release notes 和 `SHA256SUMS` 均生成。
 - [ ] 下载归档并核对校验和、版本输出和最小启动。
 - [ ] 完成 [docs/REAL_DEVICE_CHECKLIST.zh-CN.md](docs/REAL_DEVICE_CHECKLIST.zh-CN.md) 对应平台项。
@@ -172,7 +172,7 @@
 
 ## 当前结论（2026-08-15）
 
-- P0、P1、P2 的代码与既有自动化证据已闭合；P1 加固后和 P2 真机回归仍待执行。
-- P3 的 Windows 自动化证据已具备；macOS 原生 SDK 构建和所有平台真机仍是硬阻塞项。
+- P0、P1、P2 的代码与既有自动化证据已闭合；Linux Wayland 主流程已有部分真机证据，P1 加固后的细粒度热键专项与其余 P2 真机项仍待执行。
+- P3 的 Windows 自动化证据与 macOS Intel/Apple Silicon 原生 SDK 构建证据已具备；各平台真机能力仍是验收阻塞项。
 - P4、P5 的实现和自动化覆盖已落地；真实桌面交互与视觉验收未做。
-- P6 文档、工作流、本地 lint 和本地归档 smoke 已闭合；远端 GitHub CI、真实 tag 发布、下载归档复核和真机验收仍未闭合。
+- P6 文档、工作流、本地 lint/归档 smoke 与远端 GitHub CI 已闭合；真实 tag 发布、下载归档复核和真机验收仍未闭合。

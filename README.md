@@ -4,7 +4,7 @@
 
 Eloqui is a cross-platform desktop voice-input tool written in Go. A global hotkey starts a recording, an OpenAI-compatible speech-to-text endpoint transcribes it, and Eloqui either copies the result to the clipboard or pastes it into the focused application.
 
-> Eloqui is still under development. P2–P5 implementation and automated coverage are present, but the macOS native Objective-C/cgo bridge, all P2–P5 real-device regressions, remote CI, and tag-driven release publishing are not yet accepted. See [Verification status](#verification-status) before treating a platform as production-ready.
+> Eloqui is still under development. P2–P5 implementation and cross-platform CI are present, but the remaining real-device regressions and tag-driven release publishing are not yet accepted. See [Verification status](#verification-status) before treating a platform as production-ready.
 
 ## Highlights
 
@@ -23,8 +23,8 @@ Eloqui is a cross-platform desktop voice-input tool written in Go. A global hotk
 |---|---|---|
 | Linux | Full repository build/vet/race and golangci-lint passed under Linux with Xvfb; focused voice, app-reload, and X11 race repetitions also passed. | Wayland and X11 real-device regression, including microphone, hotkeys, clipboard, auto-paste, and overlay. |
 | Windows | `windows/amd64` full build, vet, tests, and golangci-lint passed locally; focused `386` tests and `arm64` platform/main-program cross-build passed. | Windows real-device end-to-end and visual/permission regression. |
-| macOS | Platform source and cgo-free helper logic are present; helper tests cross-compiled for amd64 and arm64. | Native Objective-C/cgo build with a macOS SDK, then Intel/Apple Silicon real-device regression. |
-| CI and release | GitHub Actions CI/release workflows, actionlint, local Linux/Windows archive smoke, and documentation-link checks passed. | The current `origin` is Gitee, which does not execute `.github/workflows`; run the workflows in a GitHub repository or mirror. No remote green run or `v*` tag release has been verified. |
+| macOS | Native Objective-C/cgo build, vet, and race tests passed on GitHub-hosted macOS Intel and Apple Silicon runners. | Intel/Apple Silicon real-device regression for permissions, microphone, hotkeys, clipboard, automatic paste, and overlay. |
+| CI and release | [GitHub CI run `31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) passed on Linux, Windows, macOS Intel, and macOS Apple Silicon, plus Linux lint. Actionlint, local archive smoke, and documentation-link checks also passed. | A real `v*` prerelease run, downloaded-archive/checksum verification, and the remaining real-device checklist. |
 
 Automated tests do not replace desktop hardware acceptance. The exact manual steps are in [docs/REAL_DEVICE_CHECKLIST.zh-CN.md](docs/REAL_DEVICE_CHECKLIST.zh-CN.md).
 
@@ -141,7 +141,7 @@ The GitHub workflows are configured to:
 - build Linux amd64, macOS amd64/arm64, and Windows amd64 archives for `v*` tags;
 - publish `SHA256SUMS` with the GitHub Release.
 
-Those workflows are release infrastructure, not evidence that a release exists. They remain unverified until run successfully in GitHub and followed by the real-device checklist.
+The CI workflow is verified by [run `31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754). The tag-driven Release workflow and hardware-dependent checklist remain separate acceptance steps.
 
 ## License and originality
 

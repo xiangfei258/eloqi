@@ -66,8 +66,8 @@ ASR：本机 sglang-omni（Docker 容器 moss-transcribe），model=/models/MOSS
 Eloqui tag：v0.1.0-rc.2（下载归档，tag commit 2a73fec）
 eloqi --version：eloqi v0.1.0-rc.2
 操作系统：Microsoft Windows 11 专业版 23H2，10.0.22631（x64）
-ASR：127.0.0.1 回环 WAV 校验假端点；验证非空 WAV 后返回固定 ASCII 文本，不含真实模型
-热键/模式/停止延迟/上屏：F8 / hold / 800ms 与 0ms / auto_type=false 与 true
+ASR：127.0.0.1 回环 WAV 校验假端点；可返回固定 ASCII/Unicode 文本或首请求 HTTP 503，不含真实模型
+热键/模式/停止延迟/上屏：F8 / hold 与 toggle / 800ms 与 0ms / auto_type=false 与 true
 
 结果：部分通过
 通过项：下载包 --doctor 与最小守护进程启动；实体 F8 和真实麦克风完成 6 个非空 WAV 会话，
@@ -76,8 +76,12 @@ ASR：127.0.0.1 回环 WAV 校验假端点；验证非空 WAV 后返回固定 AS
        退出后 F8 无反应，进程/overlay 消失，重启后重新注册并完成 2.701 秒录音；
        ELOQUI_STATE_DIR 统计为 recordings=6、total_characters=258、total_duration_ms=17366，
        文件不含转写正文或 API key；直接修改 stop_delay_ms/auto_type 后均记录 configuration reloaded。
-未执行项：真实 ASR 模型与识别准确率；普通用户（本次由当前 Codex 会话启动）；中文/emoji/换行剪贴板；
-          Escape/R/错误保持；TUI 双进程；高 DPI/多显示器/Unicode 错误 overlay；
+追加通过：中文/emoji/CRLF/中文标点剪贴板逐字匹配并自动上屏一次；录音中 Escape 真取消，
+          服务端无 POST 且成功统计不增加；首个有效请求 HTTP 503 后，3 秒内按 R 创建全新录音，
+          服务端恰好收到 166702/542382 字节两个非空 WAV；失败日志为 20:11:47，第二段录音 16.975 秒并于
+          20:12:06 成功，反推新录音约 20:11:49 开始；成功统计 2→3，剪贴板与 Unicode 预期逐字匹配。
+未执行项：真实 ASR 模型与识别准确率；普通用户（本次由当前 Codex 会话启动）；
+          Escape 在 stopping_delayed/waiting；错误自动超时/Unicode 错误 overlay；TUI 双进程；高 DPI/多显示器；
           用第二个应用接管麦克风；CapsLock/NumLock、左右修饰与其他组合键专项。
 边界：本记录能证明真实 Windows 热键、麦克风、平台输出和 overlay 链路，但回环假端点不能代替真实模型验收。
 ```
@@ -330,8 +334,8 @@ Windows 专项：
 
 - [ ] 普通用户运行，不要求管理员权限。
 - [ ] WinMM 16 kHz/16 bit/mono PCM，停止后设备可被其他应用使用。
-- [ ] Unicode 剪贴板覆盖中文、emoji、换行。
-- [x] SendInput 只发送一次 Ctrl+V，无 Ctrl/V 残留（2026-08-15，固定 ASCII 文本后手动输入 `vVcC` 正常）。
+- [x] Unicode 剪贴板覆盖中文、emoji、换行（2026-08-15，回环固定结果与 `Get-Clipboard -Raw` 逐字匹配）。
+- [x] SendInput 只发送一次 Ctrl+V，无 Ctrl/V 残留（2026-08-15，两行 Unicode 自动上屏一次，随后手动输入 `vVcC` 正常）。
 - [ ] 低级钩子只观察并始终传给下一个钩子，Alt+Tab 不受影响。
 - [ ] GetAsyncKeyState 轮询与钩子回退不会重复产生边沿。
 - [x] Win32 overlay 无激活、置顶、点击穿透（2026-08-15，用户人工确认）。

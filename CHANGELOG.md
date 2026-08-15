@@ -8,7 +8,7 @@ This file follows the structure of [Keep a Changelog](https://keepachangelog.com
 
 ### Documentation
 
-- Recorded the partial Windows 11 real-device acceptance of the downloaded `v0.1.0-rc.2` package. Physical hotkey/microphone capture, zero-delay and long-hold behavior, clipboard/automatic paste, overlay interaction, statistics, shutdown, and restart passed through a loopback WAV-validating endpoint; real-model, ordinary-user, Unicode, error/TUI, high-DPI/multi-display, and second-application microphone checks remain open.
+- Recorded the partial Windows 11 real-device acceptance of the downloaded `v0.1.0-rc.2` package. Physical hotkey/microphone capture, zero-delay and long-hold behavior, exact Chinese/emoji/newline clipboard output plus one automatic-paste run, recording cancellation with Escape, fail-once R retry, overlay interaction, statistics, shutdown, and restart passed through a loopback WAV-validating endpoint; real-model, ordinary-user, remaining cancellation/error/TUI, high-DPI/multi-display, and second-application microphone checks remain open.
 
 ## [0.1.0-rc.2] - 2026-08-15
 

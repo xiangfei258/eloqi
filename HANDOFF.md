@@ -153,11 +153,12 @@ Linux Wayland 已有部分真机证据，但热键细粒度、自动上屏和 ov
 - 2026-08-15 Release：[`v0.1.0-rc.2`](https://github.com/xiangfei258/eloqi/releases/tag/v0.1.0-rc.2) / run [`31868700354`](https://github.com/xiangfei258/eloqi/actions/runs/31868700354) 全绿；prerelease、非 Latest；四平台 build job 均实跑版本断言。
 - rc.2 四个归档与 `SHA256SUMS` 已下载复核：四项哈希全部匹配；每包 11 个必需文件、单一顶层目录、26 个本地文档链接无缺失；Windows/Linux 下载产物 `--version` 正确，Windows 下载包 `--doctor` 正常返回权限 warning。
 - 2026-08-15 Windows 11 23H2（build 22631，x64）下载版 rc.2 部分真机回归：实体 F8 hold、真实麦克风、6 个非空 WAV 会话（总计 17.366 秒）、0ms 松键立即收尾、一次物理长按仅产生一个会话、剪贴板与 SendInput 自动上屏、overlay 焦点/点击穿透/Alt+Tab、退出后热键失效及重启后重新录音均通过；统计为 6 次/258 字符。ASR 使用只监听回环地址的 WAV 校验假端点并返回固定 ASCII，因此不等于真实模型或 Unicode 转写验收。
+- 同日追加 Windows Unicode/取消/重试证据：回环端点返回 `中文 + emoji + CRLF + 中文标点`，Windows 剪贴板逐字匹配且 SendInput 自动上屏一次，随后 `vVcC` 正常；toggle 录音中按 Escape 产生 cancelled 日志、服务端无 POST、成功统计不增加；fail-once 端点收到 `166702` 与 `542382` 字节的两个非空 WAV，第一次 HTTP 503（20:11:47），第二次会话录音 `16.975` 秒并于 20:12:06 成功，因此 R 在约 20:11:49 启动了全新录音，落在 3 秒错误保持窗内；成功统计从 2 增到 3，剪贴板仍与 Unicode 预期逐字匹配。最后提出的错误自动超时专项没有产生请求，按用户要求停止继续测试，因此未记为通过。
 - rc.2 归档内携带的是 tag `2a73fec` 时的发布前保守文档，不包含本次发布后的证据更新；当前 master 文档是最新状态来源。
 
 尚未确认：
 
-- Ubuntu/macOS 下载包的 `--doctor` 与最小启动；Windows 的真实模型、普通用户权限、Unicode/错误/TUI/高 DPI/多显示器及第二应用麦克风接管；各目标平台其余 P2–P5 真机清单。
+- Ubuntu/macOS 下载包的 `--doctor` 与最小启动；Windows 的真实模型、普通用户权限、其余 Escape/错误状态、TUI、高 DPI/多显示器及第二应用麦克风接管；各目标平台其余 P2–P5 真机清单。
 
 ---
 

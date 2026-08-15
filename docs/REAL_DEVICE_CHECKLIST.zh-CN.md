@@ -1,6 +1,6 @@
 # Eloqui P2–P6 真机回归清单
 
-> 当前状态：**Linux Wayland 已部分执行（2026-08-15）**，Linux X11 / macOS / Windows 未执行。
+> 当前状态：**Linux Wayland 与 Windows amd64 已部分执行（2026-08-15）**，Linux X11 / macOS 未执行。
 >
 > 本清单由用户在真实设备上执行。mock、交叉编译、Xvfb、单元测试或远端 CI 都不能替代麦克风、全局热键、剪贴板、自动上屏、系统权限和 overlay 的人工验证。
 
@@ -56,6 +56,30 @@ ASR：本机 sglang-omni（Docker 容器 moss-transcribe），model=/models/MOSS
 未执行项：hold 模式、0ms 停止延迟、modifier+Tab 反例、锁定键、自动重复、左右修饰键、
           修饰键先松、auto_type 上屏、overlay 视觉细节（位置/缩放/颜色/点击穿透）。
 备注：会话日志 session 编号跳过取消的那次（Esc 生效的旁证）。
+```
+
+### 1.2 Windows amd64 已执行记录（2026-08-15）
+
+```text
+日期：2026-08-15
+执行人：xiangchang24（用户实体按键/观察）；Codex（启动、停止和非敏感日志核对）
+Eloqui tag：v0.1.0-rc.2（下载归档，tag commit 2a73fec）
+eloqi --version：eloqi v0.1.0-rc.2
+操作系统：Microsoft Windows 11 专业版 23H2，10.0.22631（x64）
+ASR：127.0.0.1 回环 WAV 校验假端点；验证非空 WAV 后返回固定 ASCII 文本，不含真实模型
+热键/模式/停止延迟/上屏：F8 / hold / 800ms 与 0ms / auto_type=false 与 true
+
+结果：部分通过
+通过项：下载包 --doctor 与最小守护进程启动；实体 F8 和真实麦克风完成 6 个非空 WAV 会话，
+       总录音 17.366 秒；0ms 松键立即收尾；长按只触发一次；剪贴板手动粘贴正确；
+       SendInput 自动插入一次且随后 vVcC 正常；overlay 不抢焦点、点击穿透、Alt+Tab 正常；
+       退出后 F8 无反应，进程/overlay 消失，重启后重新注册并完成 2.701 秒录音；
+       ELOQUI_STATE_DIR 统计为 recordings=6、total_characters=258、total_duration_ms=17366，
+       文件不含转写正文或 API key；直接修改 stop_delay_ms/auto_type 后均记录 configuration reloaded。
+未执行项：真实 ASR 模型与识别准确率；普通用户（本次由当前 Codex 会话启动）；中文/emoji/换行剪贴板；
+          Escape/R/错误保持；TUI 双进程；高 DPI/多显示器/Unicode 错误 overlay；
+          用第二个应用接管麦克风；CapsLock/NumLock、左右修饰与其他组合键专项。
+边界：本记录能证明真实 Windows 热键、麦克风、平台输出和 overlay 链路，但回环假端点不能代替真实模型验收。
 ```
 
 ---
@@ -307,11 +331,15 @@ Windows 专项：
 - [ ] 普通用户运行，不要求管理员权限。
 - [ ] WinMM 16 kHz/16 bit/mono PCM，停止后设备可被其他应用使用。
 - [ ] Unicode 剪贴板覆盖中文、emoji、换行。
-- [ ] SendInput 只发送一次 Ctrl+V，无 Ctrl/V 残留。
+- [x] SendInput 只发送一次 Ctrl+V，无 Ctrl/V 残留（2026-08-15，固定 ASCII 文本后手动输入 `vVcC` 正常）。
 - [ ] 低级钩子只观察并始终传给下一个钩子，Alt+Tab 不受影响。
 - [ ] GetAsyncKeyState 轮询与钩子回退不会重复产生边沿。
-- [ ] Win32 overlay 无激活、置顶、点击穿透。
+- [x] Win32 overlay 无激活、置顶、点击穿透（2026-08-15，用户人工确认）。
 - [ ] 退出后窗口线程、waveIn handle、hook 全部释放。
+
+> 已观察到物理 Alt+Tab 正常、一次 F8 长按只生成一个会话；这不足以证明所有钩子转发路径或轮询/fallback 竞合均在真机触发，因此上面两项保持未完成，内部路径仍由源码和自动化测试覆盖。
+>
+> 退出后进程/overlay 消失、F8 无响应，重启后热键和麦克风可重新获取；因未用第二个应用接管麦克风，上述最后一项仍保持未完成。
 
 ---
 
@@ -354,7 +382,7 @@ Gitee `origin` 已同步到 GitHub 镜像 [`xiangfei258/eloqi`](https://github.c
 - [x] 四个归档和 `SHA256SUMS` 共 5 个资产已生成并独立下载；四项 SHA-256 与 GitHub asset digest 全部一致。
 - [x] 四个原生 build runner 均在归档前实际执行并断言 `eloqi v0.1.0-rc.2`；Windows/Linux 下载产物在本地/隔离 Linux 环境复跑一致。
 - [x] 每个归档仅一个顶层目录、11 个必需文件；每包 26 个本地文档链接均无缺失；Release notes 不含 key、日志或本地配置。
-- [ ] 各目标真机从下载归档执行 `--doctor` 和最小守护进程启动：Windows `--doctor` 已正常返回并提示麦克风权限；Ubuntu/macOS 及物理能力仍待执行。
+- [ ] 各目标真机从下载归档执行 `--doctor` 和最小守护进程启动：Windows 两项均已通过；Ubuntu/macOS 仍待执行。
 
 > 边界：rc.2 归档内是 tag `2a73fec` 时的发布前保守文档；本段发布后证据只存在于后续 master，不在 rc.2 归档内。
 
@@ -365,11 +393,11 @@ Gitee `origin` 已同步到 GitHub 镜像 [`xiangfei258/eloqi`](https://github.c
 ```text
 Linux Wayland：通过 / 失败 / 未执行
 Linux X11：通过 / 失败 / 未执行
-Windows amd64：通过 / 失败 / 未执行
+Windows amd64：部分通过（下载版 rc.2；真实热键/麦克风/剪贴板/自动上屏/overlay/重启通过，真实模型及剩余专项待执行）
 macOS Intel：通过 / 失败 / 未执行
 macOS Apple Silicon：通过 / 失败 / 未执行
 GitHub CI：通过（run 31868625541，2026-08-15）
-测试 tag 发布：部分通过（v0.1.0-rc.2 流水线/资产/校验/版本通过；跨平台最小启动待真机）
+测试 tag 发布：部分通过（v0.1.0-rc.2 流水线/资产/校验/版本与 Windows 最小启动通过；Ubuntu/macOS 最小启动待真机）
 
 遗留问题：
 阻塞发布的问题：

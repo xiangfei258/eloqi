@@ -96,7 +96,7 @@ macOS 源码和当前边界：
 - 不依赖 cgo 的热键/overlay 状态逻辑已为 amd64/arm64 交叉编译。
 - GitHub Actions 已在 `macos-15-intel` 与 `macos-15`（Apple Silicon）真实 macOS SDK runner 上完成原生 Objective-C/cgo build、vet、race；这证明源码可构建，不等于热键、录音、权限或 overlay 真机通过。
 
-Linux Wayland 已有部分真机证据，但热键细粒度、自动上屏和 overlay 视觉仍未闭环；Linux X11、Windows 与 macOS 真机项尚未执行。
+Linux Wayland 已有部分真机证据，但热键细粒度、自动上屏和 overlay 视觉仍未闭环；Windows 已完成下载版 rc.2 的部分真机回归；Linux X11 与 macOS 真机项尚未执行。
 
 ### P4
 
@@ -109,7 +109,7 @@ Linux Wayland 已有部分真机证据，但热键细粒度、自动上屏和 ov
 - doctor 在 Wayland 实际尝试打开 `/dev/input/event*`，X11 不误报 evdev；依赖提示可操作。
 - TUI 日志只进系统用户缓存文件；app 装配与 P4 包的集成/race 测试已通过。
 
-仍需在真实桌面人工确认：守护进程 + TUI 双进程热重载、终端不被日志污染、热键资源切换正确。
+仍需在真实桌面人工确认：守护进程 + TUI 双进程热重载、终端不被日志污染。Windows 已确认直接修改 `stop_delay_ms`/`auto_type` 后热重载生效；provider 世代与资源切换仍由自动化测试覆盖，未把黑盒现象写成真机内部证明。
 
 ### P5
 
@@ -120,7 +120,7 @@ Linux Wayland 已有部分真机证据，但热键细粒度、自动上屏和 ov
 - overlay controller 异步映射连接、录音、停止缓冲、等待结果、错误；idle 隐藏。
 - Linux X11 用原生 Xlib 胶囊，Wayland 用 `notify-send` 回退；macOS 为 NSPanel helper；Windows 为 Win32 窗口。
 - Overlay 不可用或更新失败只记 warning，不中断 voice 主流程。
-- 统计、热词、controller 和 Linux Xvfb/Windows overlay 定向测试已通过；所有真实视觉验收待做。
+- 统计、热词、controller 和 Linux Xvfb/Windows overlay 定向测试已通过；Windows 已真机确认 overlay 不抢焦点、点击穿透、Alt+Tab 与退出无残留，错误文案、高 DPI/多显示器及其余平台视觉仍待做。
 
 ### P6
 
@@ -152,11 +152,12 @@ Linux Wayland 已有部分真机证据，但热键细粒度、自动上屏和 ov
 - 2026-08-15 发布源 commit `2a73fec` CI：run [`31868625541`](https://github.com/xiangfei258/eloqi/actions/runs/31868625541) 的四个 runner 与 lint 全绿。
 - 2026-08-15 Release：[`v0.1.0-rc.2`](https://github.com/xiangfei258/eloqi/releases/tag/v0.1.0-rc.2) / run [`31868700354`](https://github.com/xiangfei258/eloqi/actions/runs/31868700354) 全绿；prerelease、非 Latest；四平台 build job 均实跑版本断言。
 - rc.2 四个归档与 `SHA256SUMS` 已下载复核：四项哈希全部匹配；每包 11 个必需文件、单一顶层目录、26 个本地文档链接无缺失；Windows/Linux 下载产物 `--version` 正确，Windows 下载包 `--doctor` 正常返回权限 warning。
+- 2026-08-15 Windows 11 23H2（build 22631，x64）下载版 rc.2 部分真机回归：实体 F8 hold、真实麦克风、6 个非空 WAV 会话（总计 17.366 秒）、0ms 松键立即收尾、一次物理长按仅产生一个会话、剪贴板与 SendInput 自动上屏、overlay 焦点/点击穿透/Alt+Tab、退出后热键失效及重启后重新录音均通过；统计为 6 次/258 字符。ASR 使用只监听回环地址的 WAV 校验假端点并返回固定 ASCII，因此不等于真实模型或 Unicode 转写验收。
 - rc.2 归档内携带的是 tag `2a73fec` 时的发布前保守文档，不包含本次发布后的证据更新；当前 master 文档是最新状态来源。
 
 尚未确认：
 
-- Windows 下载包的最小守护进程启动；Ubuntu/macOS 下载包的 `--doctor` 与最小启动；各目标平台 P2–P5 真机清单。
+- Ubuntu/macOS 下载包的 `--doctor` 与最小启动；Windows 的真实模型、普通用户权限、Unicode/错误/TUI/高 DPI/多显示器及第二应用麦克风接管；各目标平台其余 P2–P5 真机清单。
 
 ---
 
@@ -191,7 +192,7 @@ Windows PowerShell 缓存写法见 `INSTALL.md`。macOS 原生代码只能在带
 
 ## 7. 下一步（按顺序）
 
-1. 用下载的 rc.2 归档按 [docs/REAL_DEVICE_CHECKLIST.zh-CN.md](docs/REAL_DEVICE_CHECKLIST.zh-CN.md) 完成 Windows 与 Ubuntu Wayland 的物理热键、麦克风、剪贴板/自动上屏和 overlay 回归；Wayland 先补 6 个热键细粒度专项。
+1. 在 Windows 补真实模型、普通用户、Unicode/错误/TUI、高 DPI/多显示器和第二应用麦克风接管；在 Ubuntu Wayland 先补 6 个热键细粒度专项，再补自动上屏与 overlay 视觉。
 2. 后续补 Linux X11 与 macOS Intel/Apple Silicon 真机；不要用 CI、Xvfb 或交叉编译代填“通过”。
 3. 所有目标平台阻断项清零后再发布正式 `v0.1.0`。
 

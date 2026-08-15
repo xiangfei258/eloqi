@@ -154,18 +154,19 @@
 
 ## P6 — 工程化与发布
 
-- [x] GitHub 镜像 [`xiangfei258/eloqi`](https://github.com/xiangfei258/eloqi) 已建立；Linux、Windows、macOS Intel、macOS Apple Silicon 的 build/vet/race 与 Linux lint 在 run [`31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) 全绿。
+- [x] GitHub 镜像 [`xiangfei258/eloqi`](https://github.com/xiangfei258/eloqi) 已建立；发布源 commit `2a73fec` 的 Linux、Windows、macOS Intel、macOS Apple Silicon build/vet/race 与 Linux lint 在 run [`31868625541`](https://github.com/xiangfei258/eloqi/actions/runs/31868625541) 全绿。
 - [x] `.golangci.yml` 已添加；Linux 与 Windows 本地全仓 `golangci-lint` 均为 `0 issues`，GitHub lint job 亦已通过。
-- [ ] `v*` tag 的 Linux amd64、macOS amd64/arm64、Windows amd64 打包与 `SHA256SUMS` 工作流已编写，尚未真实发布验证。
+- [x] `v0.1.0-rc.2` 已真实触发 Linux amd64、macOS amd64/arm64、Windows amd64 打包与 `SHA256SUMS` 发布；Release run [`31868700354`](https://github.com/xiangfei258/eloqi/actions/runs/31868700354) 全绿。
 - [x] `README.md` / `README.zh-CN.md`、`INSTALL.md`、`CHANGELOG.md`、配置示例、交接和真机清单已整理。
 - [x] 发布构建支持通过 `-ldflags -X main.appVersion=<tag>` 注入版本，本地构建显示 `dev`。
 - [x] Linux `tar.gz` 与 Windows `zip` 本地发布 smoke 通过：版本注入、单一顶层目录、必需资产、文档相对链接和 SHA-256 回验均正确。
 
 **发布验收**：
 
-- [x] 仓库已同步到 GitHub，四个目标 runner 与 Linux lint 全绿（run [`31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754)）。
-- [ ] 推送测试 `v*` tag，确认四个归档、Release notes 和 `SHA256SUMS` 均生成。
-- [ ] 下载归档并核对校验和、版本输出和最小启动。
+- [x] 仓库已同步到 GitHub，发布源 commit `2a73fec` 的四个目标 runner 与 Linux lint 全绿（run [`31868625541`](https://github.com/xiangfei258/eloqi/actions/runs/31868625541)）。
+- [x] 测试 tag [`v0.1.0-rc.2`](https://github.com/xiangfei258/eloqi/releases/tag/v0.1.0-rc.2) 已以 prerelease、非 Latest 发布；四个归档、Release notes 和 `SHA256SUMS` 均生成。
+- [x] 四个归档已独立下载；`SHA256SUMS` 四项全匹配，四个原生 build job 均实际执行并断言 `eloqi --version`，Windows/Linux 下载产物也复跑为 `eloqi v0.1.0-rc.2`；每包 11 个必需文件且 26 个本地文档链接无缺失。
+- [ ] 从下载归档在各目标真机执行 `--doctor` 和最小守护进程启动；Windows `--doctor` 已通过并提示麦克风权限，Ubuntu/macOS 及物理能力仍待执行。
 - [ ] 完成 [docs/REAL_DEVICE_CHECKLIST.zh-CN.md](docs/REAL_DEVICE_CHECKLIST.zh-CN.md) 对应平台项。
 
 ---
@@ -175,4 +176,4 @@
 - P0、P1、P2 的代码与既有自动化证据已闭合；Linux Wayland 主流程已有部分真机证据，P1 加固后的细粒度热键专项与其余 P2 真机项仍待执行。
 - P3 的 Windows 自动化证据与 macOS Intel/Apple Silicon 原生 SDK 构建证据已具备；各平台真机能力仍是验收阻塞项。
 - P4、P5 的实现和自动化覆盖已落地；真实桌面交互与视觉验收未做。
-- P6 文档、工作流、本地 lint/归档 smoke 与远端 GitHub CI 已闭合；真实 tag 发布、下载归档复核和真机验收仍未闭合。
+- P6 工作流、远端 CI、测试 tag、四平台归档、版本注入、下载后校验和/结构复核已闭合；各目标真机的最小启动与完整硬件验收仍未闭合，因此尚不发布正式 `v0.1.0`。

@@ -4,7 +4,7 @@
 
 Eloqui 是用 Go 编写的跨平台桌面语音输入工具：按下全局热键开始录音，由 OpenAI 兼容的语音转文字接口完成识别，再把结果写入剪贴板或粘贴到当前聚焦的应用中。
 
-> Eloqui 仍处于开发阶段。P2–P5 的实现和跨平台 CI 已经落地，但剩余真机回归与 tag 发布尚未验收。把任何平台用于正式工作前，请先看下方“验证状态”。
+> Eloqui 仍处于开发阶段。P2–P5 的实现、跨平台 CI 与 `v0.1.0-rc.2` 预发布流水线已经验收，但剩余真机回归尚未完成。不要把预发布当作正式可用版本；请先看下方“验证状态”。
 
 ## 主要能力
 
@@ -24,7 +24,7 @@ Eloqui 是用 Go 编写的跨平台桌面语音输入工具：按下全局热键
 | Linux | 已在 Linux + Xvfb 下通过全仓 build/vet/race 和 golangci-lint；voice、app 热重载与 X11 还做过定向重复 race。 | Wayland 与 X11 真机回归，包括麦克风、热键、剪贴板、自动上屏和 overlay。 |
 | Windows | 本机已通过 `windows/amd64` 全仓 build、vet、test 和 golangci-lint；完成定向 `386` 测试和 `arm64` 平台包/主程序交叉编译。 | Windows 真机端到端、权限与视觉回归。 |
 | macOS | 原生 Objective-C/cgo build、vet、race 已在 GitHub 托管的 macOS Intel 与 Apple Silicon runner 上通过。 | 分别完成 Intel/Apple Silicon 的权限、麦克风、热键、剪贴板、自动上屏与 overlay 真机回归。 |
-| CI 与发布 | [GitHub CI run `31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) 已在 Linux、Windows、macOS Intel、macOS Apple Silicon 与 Linux lint 全绿；actionlint、本地归档 smoke 和文档链接检查也已通过。 | 真实 `v*` 预发布、下载归档/校验和核对及剩余真机清单。 |
+| CI 与发布 | 发布源 commit `2a73fec` 的 [CI run `31868625541`](https://github.com/xiangfei258/eloqi/actions/runs/31868625541) 在四个目标 runner 与 lint 全绿。[`v0.1.0-rc.2`](https://github.com/xiangfei258/eloqi/releases/tag/v0.1.0-rc.2) 随后通过带门禁的 [Release run](https://github.com/xiangfei258/eloqi/actions/runs/31868700354)、四平台原生产物版本断言、独立归档/校验和/结构复核及文档链接检查。 | 各平台 `--doctor`/最小启动与剩余真机清单；完成后再发布正式 `v0.1.0`。 |
 
 自动化测试不能替代桌面真机验收。完整步骤见 [docs/REAL_DEVICE_CHECKLIST.zh-CN.md](docs/REAL_DEVICE_CHECKLIST.zh-CN.md)。
 
@@ -141,7 +141,7 @@ GitHub 工作流目前配置为：
 - `v*` tag 构建 Linux amd64、macOS amd64/arm64、Windows amd64 归档；
 - 随 GitHub Release 发布 `SHA256SUMS`。
 
-CI 工作流已由 [run `31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) 验证；tag 驱动的 Release 工作流与依赖硬件的真机清单仍是独立验收步骤。
+发布源 commit `2a73fec` 已由 [CI run `31868625541`](https://github.com/xiangfei258/eloqi/actions/runs/31868625541) 验证，tag 驱动流水线已由 [`v0.1.0-rc.2` Release run](https://github.com/xiangfei258/eloqi/actions/runs/31868700354) 验证；依赖硬件的真机验收仍是正式发布前的独立步骤。
 
 ## 许可证与原创性
 

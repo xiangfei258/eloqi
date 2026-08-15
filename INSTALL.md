@@ -2,9 +2,9 @@
 
 [English README](README.md) · [中文 README](README.zh-CN.md) · [Example configuration](eloqi.toml.example)
 
-Eloqui is currently distributed from source. GitHub release packaging has been configured but has not yet completed a verified tag run. Do not assume downloadable archives exist until a GitHub Release and its checksum file are visible.
+Eloqui is available from source and as a pipeline/archive-verified [`v0.1.0-rc.2` prerelease](https://github.com/xiangfei258/eloqi/releases/tag/v0.1.0-rc.2). It is not a stable release: complete the platform checklist before real use.
 
-Eloqui 目前以源码构建为准。GitHub 发布打包已经配置，但尚未完成一次经过验证的 tag 运行；在 GitHub Release 页面实际出现归档和校验和之前，不要假定已经有可下载的正式安装包。
+Eloqui 可从源码构建，也可下载流水线与归档已验收的 [`v0.1.0-rc.2` 预发布](https://github.com/xiangfei258/eloqi/releases/tag/v0.1.0-rc.2)。它不是正式稳定版；投入真实使用前必须完成对应平台清单。
 
 ## 1. Common requirements / 通用要求
 
@@ -245,9 +245,9 @@ macOS 必须用真实 SDK 执行本机 cgo 构建/测试；麦克风、全局热
 
 ## 9. Release archives / 发布归档
 
-The prepared GitHub workflow reacts to `v*` tags and is intended to create:
+The GitHub workflow reacts to `v*` tags and creates:
 
-当前 GitHub 工作流在 `v*` tag 时计划生成：
+当前 GitHub 工作流在 `v*` tag 时生成：
 
 - `eloqi-linux-amd64.tar.gz`;
 - `eloqi-darwin-amd64.tar.gz`;
@@ -259,6 +259,6 @@ Each platform archive has one top-level directory and preserves `docs/`; it incl
 
 每个平台归档都保留一个顶层目录和 `docs/` 层级，包含二进制、配置示例、LICENSE、THIRD_PARTY_NOTICES、双语 README、INSTALL、CHANGELOG、TASKS、ELOQUI_DESIGN 与真机清单。
 
-The Gitee `origin` is mirrored to [`xiangfei258/eloqi`](https://github.com/xiangfei258/eloqi), where [CI run `31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) passed. A real tag publication, downloaded checksum verification, and the manual device checklist are still required before calling the release pipeline accepted.
+The Gitee `origin` is mirrored to [`xiangfei258/eloqi`](https://github.com/xiangfei258/eloqi). Release-source commit `2a73fec` passed [CI](https://github.com/xiangfei258/eloqi/actions/runs/31868625541) and the [`v0.1.0-rc.2` Release run](https://github.com/xiangfei258/eloqi/actions/runs/31868700354); all archives and checksums were independently downloaded and verified. Per-platform minimum startup and the manual device checklist remain required before a stable release.
 
-Gitee `origin` 已镜像到 [`xiangfei258/eloqi`](https://github.com/xiangfei258/eloqi)，CI run [`31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) 已全绿。发布流水线要完整验收，仍需真实 tag 发布、下载后校验和核对以及真机回归。
+Gitee `origin` 已镜像到 [`xiangfei258/eloqi`](https://github.com/xiangfei258/eloqi)。发布源 commit `2a73fec` 的 [CI](https://github.com/xiangfei258/eloqi/actions/runs/31868625541) 与 [`v0.1.0-rc.2` Release run](https://github.com/xiangfei258/eloqi/actions/runs/31868700354) 已全绿，四个归档与校验和也已独立下载复核；正式发布前仍需各平台最小启动和真机回归。

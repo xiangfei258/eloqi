@@ -4,7 +4,7 @@
 
 Eloqui is a cross-platform desktop voice-input tool written in Go. A global hotkey starts a recording, an OpenAI-compatible speech-to-text endpoint transcribes it, and Eloqui either copies the result to the clipboard or pastes it into the focused application.
 
-> Eloqui is still under development. P2–P5 implementation and cross-platform CI are present, but the remaining real-device regressions and tag-driven release publishing are not yet accepted. See [Verification status](#verification-status) before treating a platform as production-ready.
+> Eloqui is still under development. P2–P5 implementation, cross-platform CI, and the `v0.1.0-rc.2` prerelease pipeline are verified, but the remaining real-device regressions are not. Do not treat the prerelease as production-ready; see [Verification status](#verification-status).
 
 ## Highlights
 
@@ -24,7 +24,7 @@ Eloqui is a cross-platform desktop voice-input tool written in Go. A global hotk
 | Linux | Full repository build/vet/race and golangci-lint passed under Linux with Xvfb; focused voice, app-reload, and X11 race repetitions also passed. | Wayland and X11 real-device regression, including microphone, hotkeys, clipboard, auto-paste, and overlay. |
 | Windows | `windows/amd64` full build, vet, tests, and golangci-lint passed locally; focused `386` tests and `arm64` platform/main-program cross-build passed. | Windows real-device end-to-end and visual/permission regression. |
 | macOS | Native Objective-C/cgo build, vet, and race tests passed on GitHub-hosted macOS Intel and Apple Silicon runners. | Intel/Apple Silicon real-device regression for permissions, microphone, hotkeys, clipboard, automatic paste, and overlay. |
-| CI and release | [GitHub CI run `31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) passed on Linux, Windows, macOS Intel, and macOS Apple Silicon, plus Linux lint. Actionlint, local archive smoke, and documentation-link checks also passed. | A real `v*` prerelease run, downloaded-archive/checksum verification, and the remaining real-device checklist. |
+| CI and release | Release-source commit `2a73fec` passed [CI run `31868625541`](https://github.com/xiangfei258/eloqi/actions/runs/31868625541) on four target runners plus lint. [`v0.1.0-rc.2`](https://github.com/xiangfei258/eloqi/releases/tag/v0.1.0-rc.2) then passed the gated [Release run](https://github.com/xiangfei258/eloqi/actions/runs/31868700354), four native version checks, independent archive/checksum/layout verification, and documentation-link checks. | Per-platform `--doctor`/minimum startup and the remaining real-device checklist before stable `v0.1.0`. |
 
 Automated tests do not replace desktop hardware acceptance. The exact manual steps are in [docs/REAL_DEVICE_CHECKLIST.zh-CN.md](docs/REAL_DEVICE_CHECKLIST.zh-CN.md).
 
@@ -141,7 +141,7 @@ The GitHub workflows are configured to:
 - build Linux amd64, macOS amd64/arm64, and Windows amd64 archives for `v*` tags;
 - publish `SHA256SUMS` with the GitHub Release.
 
-The CI workflow is verified by [run `31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754). The tag-driven Release workflow and hardware-dependent checklist remain separate acceptance steps.
+Release-source commit `2a73fec` is verified by [CI run `31868625541`](https://github.com/xiangfei258/eloqi/actions/runs/31868625541), and the tag-driven pipeline by the [`v0.1.0-rc.2` Release run](https://github.com/xiangfei258/eloqi/actions/runs/31868700354). Hardware-dependent acceptance remains a separate step before a stable release.
 
 ## License and originality
 

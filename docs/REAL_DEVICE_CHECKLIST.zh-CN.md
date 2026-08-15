@@ -317,7 +317,7 @@ Windows 专项：
 
 ## 9. P6 CI 与发布验收
 
-Gitee `origin` 已同步到 GitHub 镜像 [`xiangfei258/eloqi`](https://github.com/xiangfei258/eloqi)。以下 CI 项已由 run [`31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) 于 2026-08-15 验证。
+Gitee `origin` 已同步到 GitHub 镜像 [`xiangfei258/eloqi`](https://github.com/xiangfei258/eloqi)。以下 CI 项已由发布源 commit `2a73fec` 的 run [`31868625541`](https://github.com/xiangfei258/eloqi/actions/runs/31868625541) 于 2026-08-15 验证。
 
 ### 9.1 CI
 
@@ -347,6 +347,17 @@ Gitee `origin` 已同步到 GitHub 镜像 [`xiangfei258/eloqi`](https://github.c
 7. 确认每个归档只有一个顶层目录，并包含 LICENSE、THIRD_PARTY_NOTICES、双语 README、INSTALL、CHANGELOG、TASKS、ELOQUI_DESIGN、配置示例与 `docs/REAL_DEVICE_CHECKLIST.zh-CN.md`；逐一点击 README 内相对链接，确认没有断链。
 8. Release notes 和资产不含 API key、日志或本地配置。
 
+**2026-08-15 实际结果（`v0.1.0-rc.2`）**：
+
+- [x] [Release run `31868700354`](https://github.com/xiangfei258/eloqi/actions/runs/31868700354) 的四平台 verify、lint、四个 build 与 publish 全绿。
+- [x] [GitHub Release](https://github.com/xiangfei258/eloqi/releases/tag/v0.1.0-rc.2) 为 prerelease、非 Latest，非 draft。
+- [x] 四个归档和 `SHA256SUMS` 共 5 个资产已生成并独立下载；四项 SHA-256 与 GitHub asset digest 全部一致。
+- [x] 四个原生 build runner 均在归档前实际执行并断言 `eloqi v0.1.0-rc.2`；Windows/Linux 下载产物在本地/隔离 Linux 环境复跑一致。
+- [x] 每个归档仅一个顶层目录、11 个必需文件；每包 26 个本地文档链接均无缺失；Release notes 不含 key、日志或本地配置。
+- [ ] 各目标真机从下载归档执行 `--doctor` 和最小守护进程启动：Windows `--doctor` 已正常返回并提示麦克风权限；Ubuntu/macOS 及物理能力仍待执行。
+
+> 边界：rc.2 归档内是 tag `2a73fec` 时的发布前保守文档；本段发布后证据只存在于后续 master，不在 rc.2 归档内。
+
 ---
 
 ## 10. 最终签字
@@ -357,8 +368,8 @@ Linux X11：通过 / 失败 / 未执行
 Windows amd64：通过 / 失败 / 未执行
 macOS Intel：通过 / 失败 / 未执行
 macOS Apple Silicon：通过 / 失败 / 未执行
-GitHub CI：通过（run 31866448754，2026-08-15）
-测试 tag 发布：通过 / 失败 / 未执行
+GitHub CI：通过（run 31868625541，2026-08-15）
+测试 tag 发布：部分通过（v0.1.0-rc.2 流水线/资产/校验/版本通过；跨平台最小启动待真机）
 
 遗留问题：
 阻塞发布的问题：

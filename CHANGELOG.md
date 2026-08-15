@@ -1,10 +1,28 @@
 # Changelog
 
-All notable changes to Eloqui are recorded here. The project has not published a verified tagged release yet, so the current work remains under **Unreleased**.
+All notable changes to Eloqui are recorded here. A verified `v0.1.0-rc.2` prerelease exists, but no stable release has been accepted yet.
 
-This file follows the structure of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioned entries will be added when the first release is actually published.
+This file follows the structure of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+
+No changes yet.
+
+## [0.1.0-rc.2] - 2026-08-15
+
+### Changed
+
+- Release build jobs now execute each native Linux, Windows, macOS Intel, and macOS Apple Silicon binary and require its `--version` output to match the tag before archiving.
+
+### Verification boundary
+
+- Release-source commit `2a73fec` passed GitHub CI run [`31868625541`](https://github.com/xiangfei258/eloqi/actions/runs/31868625541) on Linux, Windows, macOS Intel, and macOS Apple Silicon, plus Linux lint.
+- The [`v0.1.0-rc.2` Release run](https://github.com/xiangfei258/eloqi/actions/runs/31868700354) passed all gates and native version assertions; its four archives and `SHA256SUMS` passed independent download, digest, layout, required-asset, and documentation-link verification.
+- Stable-release acceptance remains blocked on the per-platform minimum startup and real-device checklist.
+
+## [0.1.0-rc.1] - 2026-08-15
+
+> Superseded by `v0.1.0-rc.2`, which adds native packaged-binary version assertions.
 
 ### Added
 
@@ -56,5 +74,4 @@ This file follows the structure of [Keep a Changelog](https://keepachangelog.com
 - Local Linux and Windows release-archive smoke tests passed version injection, required-asset layout, documentation-link, and SHA-256 verification.
 - The macOS Objective-C/cgo bridge passed native build, vet, and race tests on GitHub-hosted Intel and Apple Silicon macOS runners.
 - Linux Wayland has partial P2–P5 real-device evidence; its remaining fine-grained hotkey/auto-paste/visual checks and all Linux X11, macOS, and Windows real-device regressions remain pending.
-- GitHub CI run [`31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) passed on Linux, Windows, macOS Intel, and macOS Apple Silicon, plus Linux lint.
-- No `v*` tag release, archive download, or checksum verification has been accepted yet.
+- The first [`v0.1.0-rc.1` Release run](https://github.com/xiangfei258/eloqi/actions/runs/31867426858) validated the gated four-platform packaging and checksum pipeline; `v0.1.0-rc.2` supersedes it for packaged-binary version execution coverage.

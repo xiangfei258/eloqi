@@ -17,7 +17,7 @@
 | 当前 Windows 工作区 | `D:\eloqi` |
 | 远端 | `origin = https://gitee.com/xiangchang24/eloqi.git`（Gitee，上游）；`github = https://github.com/xiangfei258/eloqi.git`（Actions/Release 镜像） |
 | 主分支 | `master` |
-| 当前发布状态 | 尚无经过 CI、tag 和真机共同验收的正式发布 |
+| 当前发布状态 | [`v0.1.0-rc.2`](https://github.com/xiangfei258/eloqi/releases/tag/v0.1.0-rc.2) 预发布的 CI/归档验收已通过；正式 `v0.1.0` 与完整真机验收未完成 |
 
 ---
 
@@ -124,14 +124,15 @@ Linux Wayland 已有部分真机证据，但热键细粒度、自动上屏和 ov
 
 ### P6
 
-已落地；CI 已完成远端验收，tag 发布仍待执行：
+已落地并完成远端 CI 与测试 tag 自动化验收：
 
 - `.github/workflows/ci.yml`：Linux/macOS/Windows build、vet、race，Linux Xvfb，golangci lint。
 - `.github/workflows/release.yml`：`v*` tag 构建 Linux amd64、macOS amd64/arm64、Windows amd64，归档并生成 `SHA256SUMS`，调用 `gh release`。
+- 四个平台的 build job 在归档前实际执行产物的 `--version` 并与 tag 严格比较。
 - `.golangci.yml`、版本 `-ldflags -X main.appVersion=<tag>`、第三方许可证声明、双语 README、安装、CHANGELOG、配置示例和真机清单。
 - Actions 均固定到已核验 commit SHA；工作流默认 `contents: read`，只有 publish job 获得 `contents: write`，且 build/publish 受四个 runner 的 verify 与 Linux lint 门禁。
 
-关键边界：Gitee 仍是 `origin`，另有 GitHub 镜像 [`xiangfei258/eloqi`](https://github.com/xiangfei258/eloqi)。CI run [`31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) 已全绿；尚无真实 tag 发布、发布资产下载或真机共同验收证据。
+关键边界：Gitee 仍是 `origin`，另有 GitHub 镜像 [`xiangfei258/eloqi`](https://github.com/xiangfei258/eloqi)。发布源 commit `2a73fec` 的 CI run [`31868625541`](https://github.com/xiangfei258/eloqi/actions/runs/31868625541) 全绿；测试 tag `v0.1.0-rc.2` 的自动化与资产已验收，但跨平台最小启动和真机能力尚未共同验收。
 
 ---
 
@@ -148,11 +149,14 @@ Linux Wayland 已有部分真机证据，但热键细粒度、自动上屏和 ov
 - P6 静态/本地：actionlint v1.7.12 通过；仓库 11 份 Markdown 的 27 个本地链接无缺失；Linux/Windows 归档 smoke 的版本、资产、目录结构、归档内链接和 SHA-256 回验通过。
 - 2026-08-15 Linux 工作区独立复核：合并至 `97478b2` 后，Linux 全仓 build/vet/`go test -race` 与 Windows amd64 交叉编译（`CGO_ENABLED=0`）通过；macOS 交叉编译因 cgo/Objective-C 依赖无法在 Linux 完成，符合预期。
 - 2026-08-15 GitHub CI：run [`31866448754`](https://github.com/xiangfei258/eloqi/actions/runs/31866448754) 的 Ubuntu + Xvfb、Windows、macOS Intel、macOS Apple Silicon、Linux golangci-lint 全绿；首轮 Windows CRLF 格式失败已由 `.gitattributes` 修复。
+- 2026-08-15 发布源 commit `2a73fec` CI：run [`31868625541`](https://github.com/xiangfei258/eloqi/actions/runs/31868625541) 的四个 runner 与 lint 全绿。
+- 2026-08-15 Release：[`v0.1.0-rc.2`](https://github.com/xiangfei258/eloqi/releases/tag/v0.1.0-rc.2) / run [`31868700354`](https://github.com/xiangfei258/eloqi/actions/runs/31868700354) 全绿；prerelease、非 Latest；四平台 build job 均实跑版本断言。
+- rc.2 四个归档与 `SHA256SUMS` 已下载复核：四项哈希全部匹配；每包 11 个必需文件、单一顶层目录、26 个本地文档链接无缺失；Windows/Linux 下载产物 `--version` 正确，Windows 下载包 `--doctor` 正常返回权限 warning。
+- rc.2 归档内携带的是 tag `2a73fec` 时的发布前保守文档，不包含本次发布后的证据更新；当前 master 文档是最新状态来源。
 
 尚未确认：
 
-- tag 打包、Release 创建、下载和校验和核对。
-- P2–P5 真机清单。
+- Windows 下载包的最小守护进程启动；Ubuntu/macOS 下载包的 `--doctor` 与最小启动；各目标平台 P2–P5 真机清单。
 
 ---
 
@@ -187,9 +191,9 @@ Windows PowerShell 缓存写法见 `INSTALL.md`。macOS 原生代码只能在带
 
 ## 7. 下一步（按顺序）
 
-1. 推送测试 `v*` 预发布 tag，核对四个归档、`eloqi --version`、Release notes 和 `SHA256SUMS`。
-2. 按 [docs/REAL_DEVICE_CHECKLIST.zh-CN.md](docs/REAL_DEVICE_CHECKLIST.zh-CN.md) 做 Linux Wayland、Linux X11、Windows、macOS 真机回归；当前只有 Linux Wayland 部分证据，不要代填其余“通过”。
-3. 只有 tag 发布与对应真机项闭合后，才把 P3/P6 和正式发布验收标为完成。
+1. 用下载的 rc.2 归档按 [docs/REAL_DEVICE_CHECKLIST.zh-CN.md](docs/REAL_DEVICE_CHECKLIST.zh-CN.md) 完成 Windows 与 Ubuntu Wayland 的物理热键、麦克风、剪贴板/自动上屏和 overlay 回归；Wayland 先补 6 个热键细粒度专项。
+2. 后续补 Linux X11 与 macOS Intel/Apple Silicon 真机；不要用 CI、Xvfb 或交叉编译代填“通过”。
+3. 所有目标平台阻断项清零后再发布正式 `v0.1.0`。
 
 ---
 
@@ -202,7 +206,7 @@ Windows PowerShell 缓存写法见 `INSTALL.md`。macOS 原生代码只能在带
 | `TASKS.md` | P0–P6 勾选状态与验收边界 |
 | `README.md` / `README.zh-CN.md` | 用户入口与当前验证状态 |
 | `INSTALL.md` | 三平台依赖、权限、构建、首次运行 |
-| `CHANGELOG.md` | Unreleased 变更与验证边界 |
+| `CHANGELOG.md` | `v0.1.0-rc.2` 变更与验证边界 |
 | `eloqi.toml.example` | 完整配置字段示例 |
 | `docs/REAL_DEVICE_CHECKLIST.zh-CN.md` | 真实设备/桌面人工回归步骤 |
 

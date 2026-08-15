@@ -146,6 +146,7 @@ macOS 源码和当前边界：
 - Windows arm64：平台测试包和主程序交叉编译。
 - macOS amd64/arm64：仅 cgo-free helper 交叉编译，不代表原生后端构建。
 - P6 静态/本地：actionlint v1.7.12 通过；仓库 11 份 Markdown 的 27 个本地链接无缺失；Linux/Windows 归档 smoke 的版本、资产、目录结构、归档内链接和 SHA-256 回验通过。
+- 2026-08-15 Linux 工作区独立复核：合并至 `97478b2` 后，Linux 全仓 build/vet/`go test -race` 与 Windows amd64 交叉编译（`CGO_ENABLED=0`）通过；macOS 交叉编译因 cgo/Objective-C 依赖无法在 Linux 完成，符合预期。
 
 尚未确认：
 

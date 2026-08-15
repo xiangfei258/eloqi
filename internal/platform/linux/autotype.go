@@ -3,8 +3,10 @@
 package linux
 
 import (
+	"context"
 	"errors"
 	"os/exec"
+	"time"
 
 	"github.com/xiangchang24/eloqi/internal/platform"
 )
@@ -15,6 +17,8 @@ import (
 type Autotype struct {
 	session   string
 	clipboard platform.Clipboard
+	timeout   time.Duration
+	command   linuxCommandFactory
 }
 
 var _ platform.Autotype = (*Autotype)(nil)
@@ -26,7 +30,9 @@ func NewAutotype(cb platform.Clipboard) (*Autotype, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Autotype{session: sess, clipboard: cb}, nil
+	return &Autotype{
+		session: sess, clipboard: cb, timeout: desktopCommandTimeout, command: exec.CommandContext,
+	}, nil
 }
 
 // Type writes text to the clipboard and simulates a paste keystroke so the
@@ -42,15 +48,28 @@ func (a *Autotype) Type(text string) error {
 
 // simulatePaste sends a Ctrl+V keystroke to the focused window.
 func (a *Autotype) simulatePaste() error {
+	timeout := a.timeout
+	if timeout <= 0 {
+		timeout = desktopCommandTimeout
+	}
+	command := a.command
+	if command == nil {
+		command = exec.CommandContext
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	var cmd *exec.Cmd
 	switch a.session {
 	case "wayland":
 		// wtype: -M press modifier, -k tap key, -m release modifier
-		cmd := exec.Command("wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl")
-		return cmd.Run()
+		cmd = command(ctx, "wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl")
 	case "x11":
-		cmd := exec.Command("xdotool", "key", "ctrl+v")
-		return cmd.Run()
+		cmd = command(ctx, "xdotool", "key", "ctrl+v")
 	default:
 		return errors.New("linux autotype: unknown session type")
 	}
+	if err := cmd.Run(); err != nil {
+		return desktopCommandError("simulate paste", timeout, ctx, err)
+	}
+	return nil
 }

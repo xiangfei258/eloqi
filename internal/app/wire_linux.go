@@ -11,30 +11,42 @@ import (
 
 // newCapabilities creates the Linux platform implementations.
 func newCapabilities() (*capabilities, error) {
-	hk, err := linux.NewHotkey()
-	if err != nil {
-		return nil, fmt.Errorf("hotkey: %w", err)
-	}
-
 	cb, err := linux.NewClipboard()
 	if err != nil {
-		hk.Close()
 		return nil, fmt.Errorf("clipboard: %w", err)
 	}
 
 	var at platform.Autotype
+	var warnings []error
 	autotype, err := linux.NewAutotype(cb)
 	if err != nil {
 		// Autotype is optional; clipboard-only mode is still usable.
 		at = nil
+		warnings = append(warnings, fmt.Errorf("autotype unavailable: %w", err))
 	} else {
 		at = autotype
 	}
 
+	var statusOverlay platform.Overlay
+	statusOverlay, err = linux.NewOverlay()
+	if err != nil {
+		// The status capsule is helpful but must never make voice input unusable.
+		warnings = append(warnings, fmt.Errorf("overlay unavailable: %w", err))
+		statusOverlay = nil
+	}
+
 	return &capabilities{
-		hotkey:      hk,
+		newHotkey: func() (platform.Hotkey, error) {
+			hotkey, err := linux.NewHotkey()
+			if err != nil {
+				return nil, fmt.Errorf("hotkey: %w", err)
+			}
+			return hotkey, nil
+		},
 		newRecorder: func() platform.Recorder { return linux.NewRecorder() },
 		clipboard:   cb,
 		autotype:    at,
+		overlay:     statusOverlay,
+		warnings:    warnings,
 	}, nil
 }

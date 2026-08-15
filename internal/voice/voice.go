@@ -1,15 +1,9 @@
-// Package voice implements the core recording-to-text flow: it listens for
-// hotkey events, drives the recorder and ASR client, and delivers the
-// recognized text to the clipboard or autotype.
-//
-// This P1 implementation deliberately keeps one session active through
-// recording and asynchronous finalization. The richer explicit state machine,
-// stop-delay buffer and session IDs arrive in P2; those will build on the
-// same "a session owns its lifecycle" invariant introduced here.
+// Package voice implements Eloqui's platform-independent recording lifecycle.
 package voice
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"strings"
@@ -20,6 +14,19 @@ import (
 	"github.com/xiangchang24/eloqi/internal/platform"
 )
 
+const (
+	// DefaultStopDelay leaves a short tail after the stop gesture so the last
+	// spoken syllable is not clipped.
+	DefaultStopDelay = 800 * time.Millisecond
+	// DefaultErrorHold keeps the error state visible long enough for R retry.
+	DefaultErrorHold = 3 * time.Second
+)
+
+var (
+	escapeKey = platform.Key{Code: platform.KeyEscape}
+	retryKey  = platform.Key{Code: platform.KeyR}
+)
+
 // RecorderFactory returns a fresh Recorder for each recording session.
 type RecorderFactory func() platform.Recorder
 
@@ -28,14 +35,27 @@ type ASRFactory func() platform.ASRClient
 
 // Config holds the dependencies and parameters for Voice.
 type Config struct {
-	Hotkey      platform.Hotkey
-	NewRecorder RecorderFactory
-	NewASR      ASRFactory
-	Clipboard   platform.Clipboard // required
-	Autotype    platform.Autotype  // optional; nil means clipboard-only
-	Key         platform.Key
-	Mode        string // "hold" or "toggle"
-	AutoType    bool   // true to inject text, false to only copy
+	Hotkey       platform.Hotkey
+	NewRecorder  RecorderFactory
+	NewASR       ASRFactory
+	Clipboard    platform.Clipboard // required unless a usable Autotype is set
+	Autotype     platform.Autotype  // optional; nil means clipboard-only
+	Key          platform.Key
+	Mode         string        // "hold" or "toggle"
+	AutoType     bool          // true to inject text, false to only copy
+	StopDelay    time.Duration // zero is immediate when StopDelaySet is true
+	StopDelaySet bool          // false preserves the API default for P1 callers
+	ErrorHold    time.Duration // zero selects DefaultErrorHold
+}
+
+// SessionResult is emitted exactly once for every session that entered the
+// connecting state. It intentionally contains no stats/overlay dependencies.
+type SessionResult struct {
+	SessionID uint64
+	Text      string
+	Duration  time.Duration
+	Err       error
+	Cancelled bool
 }
 
 // stopResult carries the recorder's final chunk and stop error.
@@ -44,38 +64,63 @@ type stopResult struct {
 	err  error
 }
 
-// session represents one complete recording/finalization cycle. It remains
-// Voice.current until finalization has finished, preventing overlapping
-// uploads or out-of-order output.
+// session owns all mutable state for one recording/finalization cycle.
 type session struct {
+	id uint64
+
 	recorder platform.Recorder
-	asr      platform.ASRClient
+
+	resourceMu        sync.Mutex
+	asr               platform.ASRClient
+	asrCloseRequested bool
+	asrClosed         bool
+	asrCancelOnce     sync.Once
+
+	recorderReady   chan struct{}
+	recorderStarted atomic.Bool
+	connected       atomic.Bool
 
 	stopRequested   atomic.Bool
 	stopRequestedCh chan struct{}
 	stopOnce        sync.Once
 	stopCh          chan stopResult
 
-	mu   sync.Mutex
-	errs []error
-	done chan struct{}
+	cancelled atomic.Bool
+
+	// delayTimer is only accessed while Voice.mu is held.
+	delayTimer *time.Timer
+
+	errMu sync.Mutex
+	errs  []error
+
+	finalMu   sync.Mutex
+	finalText string
+
+	timingMu           sync.Mutex
+	recordingStartedAt time.Time
+	recordingDuration  time.Duration
+
+	outputReady   atomic.Bool
+	outputClaimed atomic.Bool
+	outputDone    chan struct{}
+
+	finishOnce sync.Once
+	done       chan struct{}
 }
 
-func newSession(rec platform.Recorder, asr platform.ASRClient) *session {
-	s := &session{
-		recorder:        rec,
-		asr:             asr,
+func newSession(id uint64) *session {
+	return &session{
+		id:              id,
+		recorderReady:   make(chan struct{}),
 		stopRequestedCh: make(chan struct{}),
 		stopCh:          make(chan stopResult, 1),
+		outputDone:      make(chan struct{}),
 		done:            make(chan struct{}),
 	}
-	return s
 }
 
-// requestStop starts exactly one asynchronous recorder stop. The recorder is
-// expected to wake any blocked Read when Stop is called. The Linux arecord
-// implementation guarantees this; the mocks satisfy it by returning io.EOF
-// after Stop.
+// requestStop is non-blocking. The stop worker waits until Recorder.Start has
+// completed, avoiding a Start/Stop race when hold is released very quickly.
 func (s *session) requestStop() bool {
 	first := false
 	s.stopOnce.Do(func() {
@@ -83,33 +128,105 @@ func (s *session) requestStop() bool {
 		s.stopRequested.Store(true)
 		close(s.stopRequestedCh)
 		go func() {
+			<-s.recorderReady
+			if !s.recorderStarted.Load() || s.recorder == nil {
+				s.stopCh <- stopResult{}
+				return
+			}
 			tail, err := s.recorder.Stop()
+			s.markRecordingStopped()
 			s.stopCh <- stopResult{tail: tail, err: err}
 		}()
 	})
 	return first
 }
 
-func (s *session) stopping() bool {
-	return s.stopRequested.Load()
+func (s *session) attachASR(client platform.ASRClient) {
+	s.resourceMu.Lock()
+	s.asr = client
+	closeRequested := s.asrCloseRequested && client != nil
+	if closeRequested {
+		s.asrClosed = true
+	}
+	s.resourceMu.Unlock()
+	if closeRequested {
+		go func() { _ = client.Close() }()
+	}
+}
+
+func (s *session) closeASR() error {
+	s.resourceMu.Lock()
+	s.asrCloseRequested = true
+	if s.asr == nil || s.asrClosed {
+		s.resourceMu.Unlock()
+		return nil
+	}
+	client := s.asr
+	s.asrClosed = true
+	s.resourceMu.Unlock()
+	return client.Close()
+}
+
+func (s *session) cancelASR() {
+	s.asrCancelOnce.Do(func() {
+		go func() { _ = s.closeASR() }()
+	})
 }
 
 func (s *session) addErr(err error) {
 	if err == nil {
 		return
 	}
-	s.mu.Lock()
+	s.errMu.Lock()
 	s.errs = append(s.errs, err)
-	s.mu.Unlock()
+	s.errMu.Unlock()
 }
 
 func (s *session) failure() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.errMu.Lock()
+	defer s.errMu.Unlock()
 	return errors.Join(s.errs...)
 }
 
-// Voice ties hotkey events to the record-recognize-output pipeline.
+func (s *session) offerFinal(text string) {
+	if text == "" {
+		return
+	}
+	s.finalMu.Lock()
+	if s.finalText == "" {
+		s.finalText = text
+	}
+	s.finalMu.Unlock()
+}
+
+func (s *session) resultText() string {
+	s.finalMu.Lock()
+	defer s.finalMu.Unlock()
+	return s.finalText
+}
+
+func (s *session) markRecordingStarted() {
+	s.timingMu.Lock()
+	s.recordingStartedAt = time.Now()
+	s.timingMu.Unlock()
+}
+
+func (s *session) markRecordingStopped() {
+	s.timingMu.Lock()
+	if !s.recordingStartedAt.IsZero() && s.recordingDuration == 0 {
+		s.recordingDuration = time.Since(s.recordingStartedAt)
+	}
+	s.timingMu.Unlock()
+}
+
+func (s *session) recordedDuration() time.Duration {
+	s.timingMu.Lock()
+	defer s.timingMu.Unlock()
+	return s.recordingDuration
+}
+
+// Voice ties hotkey edges to an explicit state machine and an asynchronous
+// record-recognize-output pipeline.
 type Voice struct {
 	hotkey      platform.Hotkey
 	newRecorder RecorderFactory
@@ -119,165 +236,422 @@ type Voice struct {
 	key         platform.Key
 	mode        string
 	autoType    bool
+	stopDelay   time.Duration
+	errorHold   time.Duration
 
-	mu      sync.Mutex
-	current *session
-	stopped bool
+	machine *StateMachine
 
-	// OnResult receives every terminal session outcome. It may run on a session
-	// goroutine and must not call back into Voice methods that acquire mu.
-	OnResult func(text string, err error)
+	mu         sync.Mutex
+	current    *session
+	nextID     uint64
+	auxKey     platform.Key
+	errorTimer *time.Timer
+	errorToken uint64
+	started    bool
+	stopped    bool
+	sessionWG  sync.WaitGroup
+
+	quit         chan struct{}
+	loopDone     chan struct{}
+	shutdownDone chan struct{}
+	stateQueue   *stateDispatcher
+
+	// Hooks should be configured before Start. They are never invoked while
+	// Voice.mu is held. Stop drains all hook calls before returning, so a hook
+	// must not call Stop itself. OnResult is retained for P1 callers.
+	OnResult      func(text string, err error)
+	OnStateChange func(State)
+	OnSession     func(SessionResult)
 }
 
 // New creates a Voice from the given config.
 func New(cfg Config) *Voice {
 	mode := strings.ToLower(strings.TrimSpace(cfg.Mode))
-	if mode == "" {
+	if mode != "toggle" {
 		mode = "hold"
 	}
+	stopDelay := cfg.StopDelay
+	if !cfg.StopDelaySet && stopDelay == 0 {
+		stopDelay = DefaultStopDelay
+	}
+	errorHold := cfg.ErrorHold
+	if errorHold == 0 {
+		errorHold = DefaultErrorHold
+	}
 	return &Voice{
-		hotkey:      cfg.Hotkey,
-		newRecorder: cfg.NewRecorder,
-		newASR:      cfg.NewASR,
-		clipboard:   cfg.Clipboard,
-		autotype:    cfg.Autotype,
-		key:         cfg.Key,
-		mode:        mode,
-		autoType:    cfg.AutoType,
+		hotkey:       cfg.Hotkey,
+		newRecorder:  cfg.NewRecorder,
+		newASR:       cfg.NewASR,
+		clipboard:    cfg.Clipboard,
+		autotype:     cfg.Autotype,
+		key:          cfg.Key,
+		mode:         mode,
+		autoType:     cfg.AutoType,
+		stopDelay:    stopDelay,
+		errorHold:    errorHold,
+		machine:      NewStateMachine(),
+		quit:         make(chan struct{}),
+		loopDone:     make(chan struct{}),
+		shutdownDone: make(chan struct{}),
+		stateQueue:   newStateDispatcher(),
 	}
 }
 
-// Start registers the hotkey and begins listening for events.
+// State returns the current explicit lifecycle state.
+func (v *Voice) State() State { return v.machine.State() }
+
+// Start registers the primary hotkey and starts the event and callback loops.
 func (v *Voice) Start() error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.started {
+		return errors.New("voice: already started")
+	}
+	if v.stopped {
+		return errors.New("voice: already stopped")
+	}
+	if v.hotkey == nil {
+		return errors.New("voice: hotkey is required")
+	}
 	if err := v.hotkey.Register(v.key); err != nil {
 		return err
 	}
+	v.started = true
+	go v.callbackLoop()
 	go v.eventLoop()
 	return nil
 }
 
-// Stop unregisters the hotkey, cancels the active session and waits until all
-// recorder/ASR/output cleanup has completed.
+// Stop cancels an active session and waits for resource cleanup. It does not
+// close the shared Hotkey provider; application wiring still owns that.
 func (v *Voice) Stop() {
 	v.mu.Lock()
 	if v.stopped {
+		done := v.shutdownDone
 		v.mu.Unlock()
+		<-done
 		return
 	}
 	v.stopped = true
+	started := v.started
 	cur := v.current
+	if v.errorTimer != nil {
+		v.errorTimer.Stop()
+		v.errorTimer = nil
+	}
+	if cur != nil {
+		cur.cancelled.Store(true)
+		if cur.delayTimer != nil {
+			cur.delayTimer.Stop()
+			cur.delayTimer = nil
+		}
+		v.enterStoppingLocked()
+	} else if v.machine.State() == StateError {
+		v.mustTransitionLocked(StateIdle)
+	}
+	if started {
+		close(v.quit)
+	}
 	v.mu.Unlock()
 
-	_ = v.hotkey.Unregister(v.key)
 	if cur != nil {
 		cur.requestStop()
-		<-cur.done
+		cur.cancelASR()
 	}
+	if started {
+		<-v.loopDone
+	}
+	v.sessionWG.Wait()
+
+	v.mu.Lock()
+	_ = v.setAuxLocked(platform.Key{})
+	v.mu.Unlock()
+	if started {
+		_ = v.hotkey.Unregister(v.key)
+		v.stateQueue.closeAndWait()
+	}
+	close(v.shutdownDone)
+}
+
+func (v *Voice) callbackLoop() {
+	v.stateQueue.run(func(state State) {
+		if h := v.OnStateChange; h != nil {
+			h(state)
+		}
+	})
 }
 
 func (v *Voice) eventLoop() {
-	for ev := range v.hotkey.Events() {
+	defer close(v.loopDone)
+	for {
+		select {
+		case <-v.quit:
+			return
+		case ev, ok := <-v.hotkey.Events():
+			if !ok {
+				return
+			}
+			v.handleEvent(ev)
+		}
+	}
+}
+
+func (v *Voice) handleEvent(ev platform.KeyEvent) {
+	switch ev.Key {
+	case v.key:
 		if ev.Pressed {
-			v.onPress()
+			v.onPrimaryPress()
 		} else {
-			v.onRelease()
+			v.onPrimaryRelease()
+		}
+	case escapeKey:
+		if ev.Pressed {
+			v.cancelCurrent()
+		}
+	case retryKey:
+		if ev.Pressed {
+			v.retryLast()
 		}
 	}
 }
 
-func (v *Voice) onPress() {
+func (v *Voice) onPrimaryPress() {
 	v.mu.Lock()
-	cur := v.current
-	if cur != nil {
-		stopping := cur.stopping()
-		v.mu.Unlock()
-
-		// Toggle mode: the second genuine press stops a still-recording
-		// session. A press during finalization is ignored until the session
-		// has completely drained.
-		if v.mode == "toggle" && !stopping {
-			cur.requestStop()
-		}
-		return
-	}
+	defer v.mu.Unlock()
 	if v.stopped {
-		v.mu.Unlock()
 		return
 	}
-	s, startErr := v.startSession()
-	if s == nil {
-		v.mu.Unlock()
-		v.emitResult("", startErr)
-		return
+
+	switch v.machine.State() {
+	case StateIdle:
+		v.startSessionLocked()
+	case StateConnecting, StateRecording:
+		if v.mode == "toggle" {
+			v.beginStopDelayLocked()
+		}
+	case StateStoppingDelayed:
+		v.cancelStopDelayLocked()
 	}
-	v.current = s
-	v.mu.Unlock()
 }
 
-func (v *Voice) onRelease() {
+func (v *Voice) onPrimaryRelease() {
 	if v.mode != "hold" {
 		return
 	}
 	v.mu.Lock()
-	cur := v.current
-	v.mu.Unlock()
-	if cur != nil && !cur.stopping() {
-		cur.requestStop()
+	defer v.mu.Unlock()
+	if v.stopped {
+		return
+	}
+	switch v.machine.State() {
+	case StateConnecting, StateRecording:
+		v.beginStopDelayLocked()
 	}
 }
 
-// startSession starts a new recorder and ASR session. It must be called with
-// v.mu held, but returns before launching the streaming goroutine.
-func (v *Voice) startSession() (*session, error) {
-	rec := v.newRecorder()
-	asr := v.newASR()
-
-	if err := rec.Start(); err != nil {
-		_ = rec.Close()
-		return nil, err
+func (v *Voice) startSessionLocked() {
+	if v.current != nil || v.machine.State() != StateIdle || v.stopped {
+		return
 	}
-	if err := asr.Connect(); err != nil {
-		_ = rec.Close()
-		_ = asr.Close()
-		return nil, err
+	v.nextID++
+	s := newSession(v.nextID)
+	v.current = s
+	if err := v.transitionLocked(StateConnecting); err != nil {
+		v.current = nil
+		log.Printf("voice: start transition failed: %v", err)
+		return
 	}
-
-	s := newSession(rec, asr)
+	v.sessionWG.Add(1)
 	go v.runSession(s)
-	return s, nil
+}
+
+func (v *Voice) beginStopDelayLocked() {
+	s := v.current
+	if s == nil {
+		return
+	}
+	if err := v.transitionLocked(StateStoppingDelayed); err != nil {
+		return
+	}
+	id := s.id
+	s.delayTimer = time.AfterFunc(v.stopDelay, func() { v.commitDelayedStop(id) })
+}
+
+func (v *Voice) cancelStopDelayLocked() {
+	s := v.current
+	if s == nil || v.machine.State() != StateStoppingDelayed {
+		return
+	}
+	if s.delayTimer != nil {
+		s.delayTimer.Stop()
+		s.delayTimer = nil
+	}
+	to := StateConnecting
+	if s.connected.Load() {
+		to = StateRecording
+	}
+	v.mustTransitionLocked(to)
+}
+
+func (v *Voice) commitDelayedStop(id uint64) {
+	v.mu.Lock()
+	s := v.current
+	if v.stopped || s == nil || s.id != id || v.machine.State() != StateStoppingDelayed {
+		v.mu.Unlock()
+		return
+	}
+	s.delayTimer = nil
+	v.mustTransitionLocked(StateStopping)
+	v.mu.Unlock()
+	s.requestStop()
+}
+
+func (v *Voice) cancelCurrent() {
+	v.mu.Lock()
+	s := v.current
+	state := v.machine.State()
+	if s == nil || (state != StateConnecting && state != StateRecording && state != StateStoppingDelayed && state != StateStopping) {
+		v.mu.Unlock()
+		return
+	}
+	s.cancelled.Store(true)
+	if s.delayTimer != nil {
+		s.delayTimer.Stop()
+		s.delayTimer = nil
+	}
+	v.enterStoppingLocked()
+	v.mu.Unlock()
+	s.requestStop()
+	s.cancelASR()
+}
+
+func (v *Voice) retryLast() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.stopped || v.machine.State() != StateError || v.current != nil {
+		return
+	}
+	if v.errorTimer != nil {
+		v.errorTimer.Stop()
+		v.errorTimer = nil
+	}
+	v.mustTransitionLocked(StateIdle)
+	// A retry is a completely new session: factories are invoked again by
+	// runSession, so no stopped/closed recorder or ASR instance is reused.
+	v.startSessionLocked()
 }
 
 func (v *Voice) runSession(s *session) {
-	defer close(s.done)
-	defer v.clearCurrent(s)
+	if v.newRecorder == nil || v.newASR == nil {
+		s.addErr(errors.New("voice: recorder and ASR factories are required"))
+		close(s.recorderReady)
+		v.finishSession(s)
+		return
+	}
 
+	s.recorder = v.newRecorder()
+	client := v.newASR()
+	s.attachASR(client)
+	if s.recorder == nil || client == nil {
+		s.addErr(errors.New("voice: factory returned a nil dependency"))
+		close(s.recorderReady)
+		v.closeResources(s)
+		v.finishSession(s)
+		return
+	}
+
+	startErr := s.recorder.Start()
+	if startErr == nil {
+		s.recorderStarted.Store(true)
+		s.markRecordingStarted()
+	}
+	close(s.recorderReady)
+	if startErr != nil {
+		s.addErr(fmt.Errorf("start recorder: %w", startErr))
+		v.closeResources(s)
+		v.finishSession(s)
+		return
+	}
+
+	client.SetResultHandler(func(result platform.ASRResult) {
+		if !result.Final || result.Text == "" {
+			return
+		}
+		s.offerFinal(result.Text)
+		if s.outputReady.Load() {
+			v.deliverFinal(s)
+		}
+	})
+
+	if s.cancelled.Load() {
+		v.enterStopping(s)
+		v.finalizeSession(s)
+		return
+	}
+	if err := client.Connect(); err != nil {
+		s.addErr(fmt.Errorf("connect ASR: %w", err))
+		v.enterStopping(s)
+		v.finalizeSession(s)
+		return
+	}
+	s.connected.Store(true)
+	v.markConnected(s)
+
+	if s.stopRequested.Load() {
+		v.enterStopping(s)
+		v.finalizeSession(s)
+		return
+	}
+	v.streamSession(s)
+}
+
+func (v *Voice) markConnected(s *session) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.current != s {
+		return
+	}
+	if v.machine.State() == StateConnecting {
+		v.mustTransitionLocked(StateRecording)
+	}
+}
+
+func (v *Voice) streamSession(s *session) {
 	buf := make([]byte, 4096)
 	for {
 		select {
 		case <-s.stopRequestedCh:
+			v.enterStopping(s)
 			v.finalizeSession(s)
 			return
 		default:
 		}
 
 		n, err := s.recorder.Read(buf)
-		if n > 0 {
+		if n > 0 && !s.cancelled.Load() {
 			if sendErr := s.asr.Send(buf[:n]); sendErr != nil {
-				s.addErr(sendErr)
+				s.addErr(fmt.Errorf("send audio: %w", sendErr))
+				v.enterStopping(s)
+				s.requestStop()
 				v.finalizeSession(s)
 				return
 			}
 		}
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
-				s.addErr(err)
+				s.addErr(fmt.Errorf("read recorder: %w", err))
+			} else if !s.stopRequested.Load() {
+				s.addErr(errors.New("voice: recorder ended unexpectedly"))
 			}
+			v.enterStopping(s)
+			s.requestStop()
 			v.finalizeSession(s)
 			return
 		}
 		if n == 0 {
 			select {
 			case <-s.stopRequestedCh:
+				v.enterStopping(s)
 				v.finalizeSession(s)
 				return
 			case <-time.After(10 * time.Millisecond):
@@ -286,52 +660,149 @@ func (v *Voice) runSession(s *session) {
 	}
 }
 
+func (v *Voice) enterStopping(s *session) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.current == s {
+		v.enterStoppingLocked()
+	}
+}
+
+func (v *Voice) enterStoppingLocked() {
+	switch v.machine.State() {
+	case StateConnecting, StateRecording, StateStoppingDelayed:
+		v.mustTransitionLocked(StateStopping)
+	}
+}
+
 func (v *Voice) finalizeSession(s *session) {
-	// Stop is safe to invoke while a Read is blocked. The returned tail is the
-	// only authoritative remainder; do not call Stop a second time.
 	s.requestStop()
 	result := <-s.stopCh
 	if result.err != nil {
-		s.addErr(result.err)
+		s.addErr(fmt.Errorf("stop recorder: %w", result.err))
 	}
-	if len(result.tail) > 0 {
+	if len(result.tail) > 0 && !s.cancelled.Load() && s.connected.Load() && s.failure() == nil {
 		if err := s.asr.Send(result.tail); err != nil {
-			s.addErr(err)
+			s.addErr(fmt.Errorf("send final audio: %w", err))
 		}
 	}
 
-	text := ""
-	if s.failure() == nil {
-		var err error
-		text, err = s.asr.Finalize()
+	if !s.cancelled.Load() && s.connected.Load() && s.failure() == nil {
+		text, err := s.asr.Finalize()
 		if err != nil {
-			s.addErr(err)
+			if !s.cancelled.Load() {
+				s.addErr(fmt.Errorf("finalize ASR: %w", err))
+			}
+		} else {
+			s.offerFinal(text)
+			s.outputReady.Store(true)
+			v.deliverFinal(s)
+			if s.outputClaimed.Load() {
+				<-s.outputDone
+			}
 		}
 	}
 
-	if text != "" && s.failure() == nil {
-		if err := v.output(text); err != nil {
-			s.addErr(err)
-		}
-	}
-
-	if err := s.asr.Close(); err != nil {
-		s.addErr(err)
-	}
-	if err := s.recorder.Close(); err != nil {
-		s.addErr(err)
-	}
-
-	failure := s.failure()
-	if failure != nil {
-		log.Printf("voice: session failed: %v", failure)
-	}
-	v.emitResult(text, failure)
+	v.closeResources(s)
+	v.finishSession(s)
 }
 
-// output delivers text and reports the first delivery error. If autotype
-// fails, it attempts clipboard fallback and reports both failures when both
-// paths fail.
+func (v *Voice) deliverFinal(s *session) {
+	if !s.outputReady.Load() || s.cancelled.Load() || s.failure() != nil {
+		return
+	}
+	text := s.resultText()
+	if text == "" || !s.outputClaimed.CompareAndSwap(false, true) {
+		return
+	}
+	defer close(s.outputDone)
+	// Escape may race the final callback. Re-check after winning the atomic
+	// claim so cancellation never leaves a second path able to output later.
+	if s.cancelled.Load() {
+		return
+	}
+	if err := v.output(text); err != nil {
+		s.addErr(err)
+	}
+}
+
+func (v *Voice) closeResources(s *session) {
+	if s.asr != nil {
+		if err := s.closeASR(); err != nil {
+			s.addErr(fmt.Errorf("close ASR: %w", err))
+		}
+	}
+	if s.recorder != nil {
+		if err := s.recorder.Close(); err != nil {
+			s.addErr(fmt.Errorf("close recorder: %w", err))
+		}
+	}
+}
+
+func (v *Voice) finishSession(s *session) {
+	s.finishOnce.Do(func() {
+		defer v.sessionWG.Done()
+		failure := s.failure()
+		cancelled := s.cancelled.Load()
+		text := s.resultText()
+		if cancelled {
+			text = ""
+		}
+
+		v.mu.Lock()
+		if v.current == s {
+			v.current = nil
+			if cancelled {
+				v.enterStoppingLocked()
+				v.mustTransitionLocked(StateIdle)
+			} else if failure != nil {
+				v.mustTransitionLocked(StateError)
+				v.scheduleErrorResetLocked(s.id)
+			} else {
+				v.enterStoppingLocked()
+				v.mustTransitionLocked(StateIdle)
+			}
+		}
+		v.mu.Unlock()
+
+		result := SessionResult{
+			SessionID: s.id,
+			Text:      text,
+			Duration:  s.recordedDuration(),
+			Err:       failure,
+			Cancelled: cancelled,
+		}
+		if failure != nil && !cancelled {
+			log.Printf("voice: session %d failed: %v", s.id, failure)
+		}
+		if h := v.OnResult; h != nil {
+			h(result.Text, result.Err)
+		}
+		if h := v.OnSession; h != nil {
+			h(result)
+		}
+		close(s.done)
+	})
+}
+
+func (v *Voice) scheduleErrorResetLocked(token uint64) {
+	if v.errorTimer != nil {
+		v.errorTimer.Stop()
+	}
+	v.errorToken = token
+	v.errorTimer = time.AfterFunc(v.errorHold, func() {
+		v.mu.Lock()
+		defer v.mu.Unlock()
+		if v.stopped || v.machine.State() != StateError || v.errorToken != token {
+			return
+		}
+		v.errorTimer = nil
+		v.mustTransitionLocked(StateIdle)
+	})
+}
+
+// output delivers text and reports delivery errors. If autotype fails, a
+// clipboard fallback is attempted and both errors are retained when needed.
 func (v *Voice) output(text string) error {
 	if v.autoType && v.autotype != nil {
 		err := v.autotype.Type(text)
@@ -349,16 +820,53 @@ func (v *Voice) output(text string) error {
 	return errors.New("voice: no output backend configured")
 }
 
-func (v *Voice) clearCurrent(s *session) {
-	v.mu.Lock()
-	if v.current == s {
-		v.current = nil
+func (v *Voice) mustTransitionLocked(to State) {
+	if err := v.transitionLocked(to); err != nil {
+		log.Printf("voice: state transition failed: %v", err)
 	}
-	v.mu.Unlock()
 }
 
-func (v *Voice) emitResult(text string, err error) {
-	if v.OnResult != nil {
-		v.OnResult(text, err)
+func (v *Voice) transitionLocked(to State) error {
+	if err := v.machine.Transition(to); err != nil {
+		return err
 	}
+	if err := v.setAuxLocked(auxiliaryKey(to)); err != nil {
+		log.Printf("voice: auxiliary hotkey for %s: %v", to, err)
+	}
+	v.stateQueue.enqueue(to)
+	return nil
+}
+
+func auxiliaryKey(state State) platform.Key {
+	switch state {
+	case StateConnecting, StateRecording, StateStoppingDelayed, StateStopping:
+		return escapeKey
+	case StateError:
+		return retryKey
+	default:
+		return platform.Key{}
+	}
+}
+
+// setAuxLocked updates the temporary Escape/R binding. Voice.mu serializes
+// this method with all state transitions.
+func (v *Voice) setAuxLocked(next platform.Key) error {
+	if v.auxKey == next {
+		return nil
+	}
+	var errs []error
+	if v.auxKey != (platform.Key{}) {
+		if err := v.hotkey.Unregister(v.auxKey); err != nil {
+			errs = append(errs, err)
+		}
+		v.auxKey = platform.Key{}
+	}
+	if next != (platform.Key{}) {
+		if err := v.hotkey.Register(next); err != nil {
+			errs = append(errs, err)
+		} else {
+			v.auxKey = next
+		}
+	}
+	return errors.Join(errs...)
 }

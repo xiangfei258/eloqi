@@ -9,12 +9,13 @@ import (
 	"github.com/xiangchang24/eloqi/internal/app"
 )
 
-// appVersion is the current build version of Eloqi.
-const appVersion = "0.1.0"
+// appVersion is replaced by release builds through -ldflags. Keeping a useful
+// development value makes locally built binaries self-describing.
+var appVersion = "dev"
 
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "-v" || os.Args[1] == "--version") {
-		os.Stdout.WriteString("eloqi " + appVersion + "\n")
+		_, _ = os.Stdout.WriteString("eloqi " + appVersion + "\n")
 		return
 	}
 	os.Exit(app.Run())

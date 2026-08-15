@@ -54,6 +54,116 @@ func TestEvdevReleaseSurvivesModifierReleasedFirst(t *testing.T) {
 	expectNoEvent(t, h.events)
 }
 
+func TestEvdevUnregisteredAuxiliaryReleaseDoesNotPoisonNextPress(t *testing.T) {
+	key := platform.Key{Code: platform.KeyR}
+	h := newTestEvdevHotkey(key)
+
+	var mods platform.Modifiers
+	refs := make(map[platform.Modifiers]int)
+	activeCode := make(map[uint16]platform.Key)
+	activeModOnly := make(map[platform.Key]bool)
+	pending := make(map[platform.Key]*time.Timer)
+	committed := make(chan platform.Key, 1)
+
+	h.handleRawEvent(rawEvent{code: 19, value: keyPress}, &mods, refs, activeCode, activeModOnly, pending, committed)
+	if event := expectEvent(t, h.events); !event.Pressed || event.Key != key {
+		t.Fatalf("first press = %+v, want pressed %+v", event, key)
+	}
+	if err := h.Unregister(key); err != nil {
+		t.Fatal(err)
+	}
+	h.handleRawEvent(rawEvent{code: 19, value: keyRelease}, &mods, refs, activeCode, activeModOnly, pending, committed)
+	if len(activeCode) != 0 {
+		t.Fatalf("active physical keys after unregistered release = %#v", activeCode)
+	}
+	expectNoEvent(t, h.events)
+
+	if err := h.Register(key); err != nil {
+		t.Fatal(err)
+	}
+	h.handleRawEvent(rawEvent{code: 19, value: keyPress}, &mods, refs, activeCode, activeModOnly, pending, committed)
+	if event := expectEvent(t, h.events); !event.Pressed || event.Key != key {
+		t.Fatalf("second press = %+v, want pressed %+v", event, key)
+	}
+}
+
+func TestEvdevUnregisterPurgesPendingAndActiveProcessorState(t *testing.T) {
+	key := platform.Key{Mods: platform.ModAlt | platform.ModSuper}
+	h := newTestEvdevHotkey(key)
+	activeCode := map[uint16]platform.Key{19: key, 59: {Code: "F1"}}
+	activeModOnly := map[platform.Key]bool{key: true}
+	timer := time.NewTimer(time.Hour)
+	defer timer.Stop()
+	pending := map[platform.Key]*time.Timer{key: timer}
+
+	if err := h.applyRegistrationCommand(
+		evdevRegistrationCommand{key: key},
+		activeCode,
+		activeModOnly,
+		pending,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if h.registered[key] || activeModOnly[key] || pending[key] != nil {
+		t.Fatalf("unregister left stale state: registered=%v active=%v pending=%v", h.registered[key], activeModOnly[key], pending[key])
+	}
+	if _, exists := activeCode[19]; exists {
+		t.Fatalf("unregister left active physical binding: %#v", activeCode)
+	}
+	if _, exists := activeCode[59]; !exists {
+		t.Fatalf("unregister removed unrelated active binding: %#v", activeCode)
+	}
+	if err := h.applyRegistrationCommand(
+		evdevRegistrationCommand{key: key, register: true},
+		activeCode,
+		activeModOnly,
+		pending,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !h.registered[key] {
+		t.Fatal("binding was not re-registered")
+	}
+}
+
+func TestEvdevFullPublicQueueDoesNotBlockControlPlaneOrClose(t *testing.T) {
+	dispatcher := newEvdevEventDispatcher(1)
+	h := &evdevHotkey{
+		registered: make(map[platform.Key]bool),
+		events:     dispatcher.events,
+		rawCh:      make(chan rawEvent, 1),
+		commands:   make(chan evdevRegistrationCommand),
+		dispatcher: dispatcher,
+		done:       make(chan struct{}),
+	}
+	h.wg.Add(1)
+	go h.processEvents()
+
+	// Leave the public channel full and queue more edges behind it. Registration
+	// commands must still be processed by the independent state owner.
+	for i := 0; i < 8; i++ {
+		h.emit(platform.KeyEvent{Key: platform.Key{Code: platform.KeyR}, Pressed: i%2 == 0})
+	}
+	key := platform.Key{Code: platform.KeyR}
+	if err := h.Register(key); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Unregister(key); err != nil {
+		t.Fatal(err)
+	}
+
+	closed := make(chan struct{})
+	go func() {
+		_ = h.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("Close blocked behind a full public event queue")
+	}
+}
+
 func TestEvdevModifierOnlyCandidateCancelledByNextKey(t *testing.T) {
 	key := platform.Key{Mods: platform.ModAlt | platform.ModSuper}
 	h := newTestEvdevHotkey(key)

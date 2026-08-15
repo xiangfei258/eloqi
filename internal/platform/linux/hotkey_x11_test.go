@@ -426,6 +426,76 @@ func TestX11EmitUnblocksWhenStopCloses(t *testing.T) {
 	}
 }
 
+func TestX11UnregisterStateClearReturnsWithFullEventsAndActiveKey(t *testing.T) {
+	key := platform.Key{Code: platform.KeyEscape}
+	other := platform.Key{Code: platform.KeyR}
+	events := make(chan platform.KeyEvent, 1)
+	events <- platform.KeyEvent{Key: key, Pressed: true}
+	hotkey := &x11Hotkey{
+		events: events,
+		stop:   make(chan struct{}),
+	}
+	hotkey.dispatcher = newX11EventDispatcher(events)
+	activeCode := map[uint]platform.Key{24: other}
+	activeModOnly := map[platform.Key]bool{key: true}
+	pending := map[platform.Key]*time.Timer{key: time.NewTimer(time.Hour)}
+	defer func() {
+		for _, timer := range pending {
+			timer.Stop()
+		}
+	}()
+
+	// First drive the same raw-edge path as the Xlib owner. Before the
+	// dispatcher this call wedged in emit and the later Unregister command
+	// could never be handled.
+	rawReturned := make(chan struct{})
+	go func() {
+		hotkey.handleXKeyEdge(
+			x11KeyEdge{pressed: true, keycode: 23},
+			map[grabKey]platform.Key{{keycode: 23}: key},
+			activeCode,
+			activeModOnly,
+			nil,
+			nil,
+			pending,
+			make(chan platform.Key, 1),
+			&x11ModifierTracker{},
+			func(uint) bool { return false },
+		)
+		close(rawReturned)
+	}()
+	select {
+	case <-rawReturned:
+	case <-time.After(time.Second):
+		t.Fatal("X11 owner was blocked by a full public Events channel")
+	}
+	if got := activeCode[23]; got != key {
+		t.Fatalf("raw edge did not activate binding: %+v", got)
+	}
+
+	clearX11BindingState(key, activeCode, activeModOnly, pending)
+	if _, active := activeCode[23]; active {
+		t.Fatal("unregistered active key survived state clear")
+	}
+	if got := activeCode[24]; got != other {
+		t.Fatalf("unrelated active key was removed: %+v", got)
+	}
+	if activeModOnly[key] || pending[key] != nil {
+		t.Fatalf("modifier-only state survived: active=%v pending=%v", activeModOnly, pending)
+	}
+
+	closed := make(chan struct{})
+	go func() {
+		hotkey.dispatcher.close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("X11 dispatcher Close blocked on abandoned public Events")
+	}
+}
+
 func TestX11RegisterReportsServerGrabConflict(t *testing.T) {
 	if os.Getenv("DISPLAY") == "" {
 		t.Skip("requires an X11 display")
@@ -435,12 +505,12 @@ func TestX11RegisterReportsServerGrabConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open first X11 hotkey: %v", err)
 	}
-	defer first.Close()
+	defer func() { _ = first.Close() }()
 	second, err := newX11Hotkey()
 	if err != nil {
 		t.Fatalf("open second X11 hotkey: %v", err)
 	}
-	defer second.Close()
+	defer func() { _ = second.Close() }()
 
 	key := platform.Key{Code: platform.KeyTab}
 	type registerResult struct {

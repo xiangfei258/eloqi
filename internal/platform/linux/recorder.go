@@ -338,7 +338,6 @@ func (r *ArecordRecorder) finishShutdown(force bool, pumpWasRunning bool) {
 	if !finished && !forced {
 		timedOut = true
 		errs = append(errs, fmt.Errorf("%w (%s)", errRecorderStopTimeout, stopTimeout))
-		forced = true
 		kill()
 		waitErr, finished = waitForRecorder(waitDone, killTimeout)
 	}
@@ -387,7 +386,7 @@ func isProcessExitError(err error) bool {
 // buffer. The buffer is capped so a caller that never reads cannot grow memory
 // without bound while recording.
 func (r *ArecordRecorder) pump(stdout io.ReadCloser) {
-	defer stdout.Close()
+	defer func() { _ = stdout.Close() }()
 	defer func() {
 		r.mu.Lock()
 		r.pumpDone = true

@@ -198,6 +198,7 @@ type x11Hotkey struct {
 	detectableRepeat bool
 	closed           atomic.Bool
 	events           chan platform.KeyEvent
+	dispatcher       *x11EventDispatcher
 	commands         chan x11Command
 	stop             chan struct{}
 	done             chan struct{}
@@ -356,13 +357,17 @@ var (
 	x11ThreadsReady    bool
 )
 
-// newX11Hotkey opens the X display, enables detectable auto-repeat and starts
-// the single-owner event loop.
-func newX11Hotkey() (*x11Hotkey, error) {
+func ensureX11Threads() bool {
 	x11InitThreadsOnce.Do(func() {
 		x11ThreadsReady = C.XInitThreads() != 0
 	})
-	if !x11ThreadsReady {
+	return x11ThreadsReady
+}
+
+// newX11Hotkey opens the X display, enables detectable auto-repeat and starts
+// the single-owner event loop.
+func newX11Hotkey() (*x11Hotkey, error) {
+	if !ensureX11Threads() {
 		return nil, fmt.Errorf("x11 hotkey: Xlib thread initialization failed")
 	}
 
@@ -386,6 +391,7 @@ func newX11Hotkey() (*x11Hotkey, error) {
 		stop:             make(chan struct{}),
 		done:             make(chan struct{}),
 	}
+	h.dispatcher = newX11EventDispatcher(h.events)
 	h.wg.Add(1)
 	go h.eventLoop()
 	return h, nil
@@ -437,15 +443,24 @@ func (h *x11Hotkey) Events() <-chan platform.KeyEvent {
 func (h *x11Hotkey) Close() error {
 	if !h.closed.CompareAndSwap(false, true) {
 		h.wg.Wait()
-		h.eventsOnce.Do(func() { close(h.events) })
+		if h.dispatcher != nil {
+			h.dispatcher.close()
+		} else {
+			h.eventsOnce.Do(func() { close(h.events) })
+		}
 		return nil
 	}
-	// emit may be blocked on a full events channel. Closing stop first releases
-	// it so the event loop can receive and execute the close command.
+	// Stop timers and legacy fallback emitters before asking the Xlib owner to
+	// release its grabs. The dispatcher keeps public Events backpressure out of
+	// this command path.
 	close(h.stop)
 	err := h.submit(x11Command{kind: x11Close})
 	h.wg.Wait()
-	h.eventsOnce.Do(func() { close(h.events) })
+	if h.dispatcher != nil {
+		h.dispatcher.close()
+	} else {
+		h.eventsOnce.Do(func() { close(h.events) })
+	}
 	return err
 }
 
@@ -483,6 +498,9 @@ func waitX11CommandResponse(resp <-chan error, done <-chan struct{}) error {
 func (h *x11Hotkey) eventLoop() {
 	defer h.wg.Done()
 	defer close(h.done)
+	if h.dispatcher != nil {
+		defer h.dispatcher.close()
+	}
 
 	grabs := make(map[grabKey]platform.Key)
 	ownedGrabs := make(map[platform.Key][]grabKey)
@@ -537,14 +555,7 @@ func (h *x11Hotkey) eventLoop() {
 			C.XSync(h.display, 0)
 			delete(ownedGrabs, cmd.key)
 			delete(physicalCodes, cmd.key)
-			if timer := pending[cmd.key]; timer != nil {
-				timer.Stop()
-				delete(pending, cmd.key)
-			}
-			if activeModOnly[cmd.key] {
-				delete(activeModOnly, cmd.key)
-				h.emit(platform.KeyEvent{Key: cmd.key, Pressed: false})
-			}
+			clearX11BindingState(cmd.key, activeCode, activeModOnly, pending)
 			cmd.resp <- nil
 		case x11Close:
 			for gk := range grabs {
@@ -758,6 +769,28 @@ func x11KeyEdgeFromEvent(ev *C.XEvent) (x11KeyEdge, bool) {
 	return edge, true
 }
 
+// clearX11BindingState is the delivery boundary for Unregister. It discards
+// provider-owned active state without publishing a release: Voice.Stop calls
+// Unregister after its Events consumer has exited, and a synthetic event could
+// otherwise wedge the X11 owner loop behind a full channel before cmd.resp.
+func clearX11BindingState(
+	key platform.Key,
+	activeCode map[uint]platform.Key,
+	activeModOnly map[platform.Key]bool,
+	pending map[platform.Key]*time.Timer,
+) {
+	if timer := pending[key]; timer != nil {
+		timer.Stop()
+	}
+	delete(pending, key)
+	delete(activeModOnly, key)
+	for physical, binding := range activeCode {
+		if binding == key {
+			delete(activeCode, physical)
+		}
+	}
+}
+
 // handleXKeyEdge converts X11 key edges while preserving the binding
 // associated with the physical press. Release lookup therefore does not
 // depend on the modifier state remaining unchanged.
@@ -903,6 +936,10 @@ func (h *x11Hotkey) releaseAllModifierOnly(
 }
 
 func (h *x11Hotkey) emit(ev platform.KeyEvent) {
+	if h.dispatcher != nil {
+		h.dispatcher.enqueue(ev)
+		return
+	}
 	select {
 	case h.events <- ev:
 	case <-h.stop:
@@ -938,6 +975,10 @@ func modsToX11Mask(mods platform.Modifiers) uint {
 // keysym value.
 func keyCodeToX11Keysym(code platform.KeyCode) uint {
 	switch code {
+	case platform.KeyEscape:
+		return 0xFF1B // XK_Escape
+	case platform.KeyR:
+		return 0x0072 // XK_r
 	case platform.KeyTab:
 		return 0xFF09 // XK_Tab
 	case platform.KeyCapsLock:

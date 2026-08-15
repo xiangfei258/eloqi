@@ -4,6 +4,7 @@ package linux
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/xiangchang24/eloqi/internal/evdev"
 	"github.com/xiangchang24/eloqi/internal/platform"
 )
 
@@ -49,6 +51,8 @@ var evdevModMap = map[uint16]platform.Modifiers{
 
 // evdevKeyMap maps evdev non-modifier key codes to platform.KeyCode values.
 var evdevKeyMap = map[uint16]platform.KeyCode{
+	1:  platform.KeyEscape, // KEY_ESC
+	19: platform.KeyR,      // KEY_R (reserved retry binding)
 	15: platform.KeyTab,
 	58: platform.KeyCapsLock,
 	59: "F1", 60: "F2", 61: "F3", 62: "F4", 63: "F5", 64: "F6",
@@ -75,12 +79,98 @@ type rawEvent struct {
 	value int32
 }
 
+type evdevRegistrationCommand struct {
+	key      platform.Key
+	register bool
+	response chan error
+}
+
+// evdevEventDispatcher keeps public Events backpressure off the processor that
+// owns registration and physical-key state. Shutdown discards queued edges so
+// Unregister and Close remain bounded even after the Voice consumer exits.
+type evdevEventDispatcher struct {
+	mu      sync.Mutex
+	ready   *sync.Cond
+	pending []platform.KeyEvent
+	head    int
+	closed  bool
+	events  chan platform.KeyEvent
+	stop    chan struct{}
+	done    chan struct{}
+	once    sync.Once
+}
+
+func newEvdevEventDispatcher(capacity int) *evdevEventDispatcher {
+	d := &evdevEventDispatcher{
+		events: make(chan platform.KeyEvent, capacity),
+		stop:   make(chan struct{}),
+		done:   make(chan struct{}),
+	}
+	d.ready = sync.NewCond(&d.mu)
+	go d.run()
+	return d
+}
+
+func (d *evdevEventDispatcher) enqueue(event platform.KeyEvent) {
+	d.mu.Lock()
+	if !d.closed {
+		d.pending = append(d.pending, event)
+		d.ready.Signal()
+	}
+	d.mu.Unlock()
+}
+
+func (d *evdevEventDispatcher) run() {
+	defer close(d.events)
+	defer close(d.done)
+	for {
+		d.mu.Lock()
+		for d.head == len(d.pending) && !d.closed {
+			d.ready.Wait()
+		}
+		if d.closed {
+			d.mu.Unlock()
+			return
+		}
+		event := d.pending[d.head]
+		d.head++
+		if d.head >= 64 && d.head*2 >= len(d.pending) {
+			copy(d.pending, d.pending[d.head:])
+			d.pending = d.pending[:len(d.pending)-d.head]
+			d.head = 0
+		}
+		d.mu.Unlock()
+
+		select {
+		case d.events <- event:
+		case <-d.stop:
+			return
+		}
+	}
+}
+
+func (d *evdevEventDispatcher) closeAndWait() {
+	if d == nil {
+		return
+	}
+	d.once.Do(func() {
+		d.mu.Lock()
+		d.closed = true
+		close(d.stop)
+		d.ready.Broadcast()
+		d.mu.Unlock()
+	})
+	<-d.done
+}
+
 // evdevHotkey implements platform.Hotkey using the Linux evdev interface.
 type evdevHotkey struct {
 	mu         sync.Mutex
 	registered map[platform.Key]bool
 	events     chan platform.KeyEvent
 	rawCh      chan rawEvent
+	commands   chan evdevRegistrationCommand
+	dispatcher *evdevEventDispatcher
 	done       chan struct{}
 	files      []*os.File
 	closed     bool
@@ -101,10 +191,13 @@ func newEvdevHotkey() (*evdevHotkey, error) {
 		return nil, fmt.Errorf("evdev: no /dev/input/event* devices found (add user to the 'input' group)")
 	}
 
+	dispatcher := newEvdevEventDispatcher(64)
 	h := &evdevHotkey{
 		registered: make(map[platform.Key]bool),
-		events:     make(chan platform.KeyEvent, 64),
+		events:     dispatcher.events,
 		rawCh:      make(chan rawEvent, 256),
+		commands:   make(chan evdevRegistrationCommand),
+		dispatcher: dispatcher,
 		done:       make(chan struct{}),
 	}
 
@@ -114,11 +207,17 @@ func newEvdevHotkey() (*evdevHotkey, error) {
 		if err != nil {
 			continue
 		}
+		keyboard, probeErr := evdev.IsKeyboardDevice(p, os.ReadFile)
+		if probeErr != nil || !keyboard {
+			_ = f.Close()
+			continue
+		}
 		h.files = append(h.files, f)
 		opened++
 	}
 	if opened == 0 {
-		return nil, fmt.Errorf("evdev: cannot open any /dev/input/event* device (add user to the 'input' group)")
+		dispatcher.closeAndWait()
+		return nil, fmt.Errorf("evdev: cannot open a keyboard-capable /dev/input/event* device (add user to the 'input' group)")
 	}
 
 	for _, f := range h.files {
@@ -133,6 +232,9 @@ func newEvdevHotkey() (*evdevHotkey, error) {
 
 // Register adds a hotkey binding.
 func (h *evdevHotkey) Register(key platform.Key) error {
+	if h.commands != nil {
+		return h.submitRegistration(key, true)
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed {
@@ -147,10 +249,29 @@ func (h *evdevHotkey) Register(key platform.Key) error {
 
 // Unregister removes a hotkey binding.
 func (h *evdevHotkey) Unregister(key platform.Key) error {
+	if h.commands != nil {
+		return h.submitRegistration(key, false)
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.registered, key)
 	return nil
+}
+
+func (h *evdevHotkey) submitRegistration(key platform.Key, register bool) error {
+	response := make(chan error, 1)
+	command := evdevRegistrationCommand{key: key, register: register, response: response}
+	select {
+	case <-h.done:
+		return fmt.Errorf("evdev hotkey: closed")
+	case h.commands <- command:
+	}
+	select {
+	case <-h.done:
+		return fmt.Errorf("evdev hotkey: closed")
+	case err := <-response:
+		return err
+	}
 }
 
 // Events returns the channel delivering hotkey edge events.
@@ -169,12 +290,19 @@ func (h *evdevHotkey) Close() error {
 	h.mu.Unlock()
 
 	close(h.done)
+	var closeErrs []error
 	for _, f := range h.files {
-		f.Close()
+		if err := f.Close(); err != nil {
+			closeErrs = append(closeErrs, fmt.Errorf("evdev: close input device: %w", err))
+		}
 	}
 	h.wg.Wait()
-	close(h.events)
-	return nil
+	if h.dispatcher != nil {
+		h.dispatcher.closeAndWait()
+	} else {
+		close(h.events)
+	}
+	return errors.Join(closeErrs...)
 }
 
 // readDevice reads input_event structs from a device file and sends key events
@@ -235,15 +363,22 @@ func (h *evdevHotkey) processEvents() {
 				return
 			}
 			handle(raw)
+		case command := <-h.commands:
+			err := h.applyRegistrationCommand(command, activeCode, activeModOnly, pending)
+			command.response <- err
 		case key := <-committed:
 			// The timer may have raced with a cancellation; verify the state
 			// again before emitting the press edge.
+			timer, waiting := pending[key]
+			if !waiting {
+				continue
+			}
+			timer.Stop()
+			delete(pending, key)
 			h.mu.Lock()
 			registered := h.registered[key]
 			h.mu.Unlock()
-			if timer, ok := pending[key]; ok && registered && !activeModOnly[key] && key.Mods == modState {
-				timer.Stop()
-				delete(pending, key)
+			if registered && !activeModOnly[key] && key.Mods == modState {
 				activeModOnly[key] = true
 				h.emit(platform.KeyEvent{Key: key, Pressed: true})
 			}
@@ -252,6 +387,42 @@ func (h *evdevHotkey) processEvents() {
 			return
 		}
 	}
+}
+
+func (h *evdevHotkey) applyRegistrationCommand(
+	command evdevRegistrationCommand,
+	activeCode map[uint16]platform.Key,
+	activeModOnly map[platform.Key]bool,
+	pending map[platform.Key]*time.Timer,
+) error {
+	h.mu.Lock()
+	var err error
+	switch {
+	case h.closed:
+		err = fmt.Errorf("evdev hotkey: closed")
+	case command.register && h.registered[command.key]:
+		err = fmt.Errorf("evdev hotkey: already registered: %s", command.key)
+	case command.register:
+		h.registered[command.key] = true
+	default:
+		delete(h.registered, command.key)
+	}
+	h.mu.Unlock()
+	if err != nil || command.register {
+		return err
+	}
+
+	if timer := pending[command.key]; timer != nil {
+		timer.Stop()
+	}
+	delete(pending, command.key)
+	delete(activeModOnly, command.key)
+	for physical, binding := range activeCode {
+		if binding == command.key {
+			delete(activeCode, physical)
+		}
+	}
+	return nil
 }
 
 // handleRawEvent processes a single raw evdev key event.
@@ -297,6 +468,26 @@ func (h *evdevHotkey) handleRawEvent(
 	if !ok {
 		return
 	}
+
+	// A binding may be unregistered synchronously by the consumer as soon as
+	// its press edge is delivered (Esc and R do this in the voice lifecycle).
+	// Always retire the physical press on release, even when the binding is no
+	// longer registered, or the next press of that physical key is suppressed
+	// forever as a duplicate. Only emit the release when the original binding
+	// is still registered, preserving Unregister's delivery boundary.
+	if !pressed {
+		if binding, active := activeCode[raw.code]; active {
+			delete(activeCode, raw.code)
+			h.mu.Lock()
+			registered := h.registered[binding]
+			h.mu.Unlock()
+			if registered {
+				h.emit(platform.KeyEvent{Key: binding, Pressed: false})
+			}
+		}
+		return
+	}
+
 	key := platform.Key{Mods: *modState, Code: code}
 
 	h.mu.Lock()
@@ -306,16 +497,6 @@ func (h *evdevHotkey) handleRawEvent(
 		return
 	}
 
-	// Pair release with the original press binding, not with the modifier
-	// state at release time. If Ctrl is released before F1, the F1 release
-	// still closes the Ctrl+F1 edge.
-	if !pressed {
-		if binding, active := activeCode[raw.code]; active {
-			delete(activeCode, raw.code)
-			h.emit(platform.KeyEvent{Key: binding, Pressed: false})
-		}
-		return
-	}
 	if _, active := activeCode[raw.code]; active {
 		return
 	}
@@ -397,6 +578,10 @@ func (h *evdevHotkey) releaseAllModOnly(active map[platform.Key]bool, pending ma
 
 // emit sends an event unless the hotkey is shutting down.
 func (h *evdevHotkey) emit(ev platform.KeyEvent) {
+	if h.dispatcher != nil {
+		h.dispatcher.enqueue(ev)
+		return
+	}
 	select {
 	case h.events <- ev:
 	case <-h.done:

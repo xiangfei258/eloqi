@@ -56,6 +56,12 @@ const KeyNone KeyCode = ""
 // (letters, digits, punctuation, space) are deliberately absent: a hotkey
 // must not collide with ordinary typing.
 const (
+	// KeyEscape and KeyR are reserved auxiliary bindings used while a voice
+	// session is active or in the error state. Configuration validation does
+	// not accept them as primary user hotkeys.
+	KeyEscape KeyCode = "Escape"
+	KeyR      KeyCode = "R"
+
 	KeyTab      KeyCode = "Tab"
 	KeyCapsLock KeyCode = "CapsLock"
 

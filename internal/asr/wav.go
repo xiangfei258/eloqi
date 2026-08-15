@@ -3,6 +3,8 @@ package asr
 import (
 	"encoding/binary"
 	"fmt"
+	"strings"
+	"unicode"
 )
 
 // wavHeader builds a canonical 44-byte WAV header for raw PCM data with the
@@ -43,6 +45,19 @@ func wrapWAV(pcm []byte, sampleRate, channels, bitsPerSample int) []byte {
 
 // describeMultipartError formats a common failure message when the HTTP
 // response is not what the client expected.
-func describeMultipartError(status int, body []byte) error {
-	return fmt.Errorf("asr: HTTP %d: %s", status, string(body))
+func describeMultipartError(status int, body []byte, truncated bool) error {
+	message := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, string(body))
+	message = strings.Join(strings.Fields(message), " ")
+	if message == "" {
+		message = "empty response body"
+	}
+	if truncated {
+		message += " ... (truncated)"
+	}
+	return fmt.Errorf("asr: HTTP %d: %s", status, message)
 }

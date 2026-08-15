@@ -94,6 +94,11 @@ jobs:
           GOARCH: ${{ matrix.goarch || 'amd64' }}
         run: |
           go build -trimpath -ldflags="-s -w -X main.appVersion=${GITHUB_REF_NAME}" -o eloqi ./cmd/eloqi
+          version_output="$(./eloqi --version)"
+          test "$version_output" = "eloqi ${GITHUB_REF_NAME}" || {
+            printf 'unexpected version output: %s\n' "$version_output"
+            exit 1
+          }
           package_root="${{ matrix.asset }}"
           mkdir -p "$package_root/docs"
           cp eloqi LICENSE THIRD_PARTY_NOTICES.md README.md README.zh-CN.md INSTALL.md CHANGELOG.md TASKS.md ELOQUI_DESIGN.md eloqi.toml.example "$package_root/"
@@ -104,6 +109,11 @@ jobs:
         shell: pwsh
         run: |
           go build -trimpath -ldflags="-s -w -X main.appVersion=$env:GITHUB_REF_NAME" -o eloqi.exe ./cmd/eloqi
+          $versionOutput = (& .\eloqi.exe --version).Trim()
+          $expectedVersion = "eloqi $env:GITHUB_REF_NAME"
+          if ($versionOutput -ne $expectedVersion) {
+            throw "unexpected version output: $versionOutput"
+          }
           $packageRoot = "${{ matrix.asset }}"
           New-Item -ItemType Directory -Force -Path (Join-Path $packageRoot 'docs') | Out-Null
           Copy-Item eloqi.exe,LICENSE,THIRD_PARTY_NOTICES.md,README.md,README.zh-CN.md,INSTALL.md,CHANGELOG.md,TASKS.md,ELOQUI_DESIGN.md,eloqi.toml.example -Destination $packageRoot

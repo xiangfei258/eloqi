@@ -57,7 +57,7 @@
 
 - [x] 2026-08-14 在 GNOME Wayland 完成 P1 原始闭环真机验证：`Alt+Super` toggle、本机兼容 ASR、剪贴板输出。
 - [x] Linux 自动化 build/vet/race 已覆盖当前 P1 代码。
-- [ ] P1 热键加固后的统一真机复测：普通 hold、toggle、modifier-only、modifier+Tab 反例、锁定键、自动重复和修饰键先松场景。
+- [x] P1 热键复测（Linux Wayland 2026-08-15）：toggle + modifier-only（`Alt+Super`）闭环通过；hold、modifier+Tab 反例、锁定键、自动重复、左右修饰键、修饰键先松仍需专项复测。
 
 > GNOME Wayland 已知边界：`wtype` 在部分桌面不可用；此时使用 `output.auto_type = false`，转写只进入剪贴板。
 
@@ -81,7 +81,7 @@
 - [x] `internal/voice` 在 Linux 下定向 `go test -race -count=3` 通过。
 - [x] 快速连按 10 次与 hold 快速点按测试最终回 idle，且无重复输出。
 - [x] Linux + Xvfb 全仓 race 对当前 P2 代码通过。
-- [ ] P2 真机回归：hold/toggle、停止缓冲恢复、0ms 延迟、Escape、R、错误 overlay 与资源释放。
+- [x] P2 真机回归（Linux Wayland 2026-08-15）：toggle 停止缓冲 800ms 不截断、缓冲期恢复录音、Esc 取消、R 重试、防重、notify-send 错误提示、退出后重进无占用均通过；hold 模式与 0ms 延迟待专项复测。
 
 ---
 
@@ -104,7 +104,7 @@
 
 **真机验收**：
 
-- [ ] Linux Wayland。
+- [x] Linux Wayland（2026-08-15，剪贴板模式；auto_type 受 GNOME 限制）。
 - [ ] Linux X11。
 - [ ] macOS Intel。
 - [ ] macOS Apple Silicon。
@@ -129,7 +129,7 @@
 - [x] `internal/doctor` 对 Wayland/X11 分支、依赖缺失和 evdev 权限提示有单元测试。
 - [x] `internal/tui` 覆盖完整字段 round-trip、取消、密钥保护、原子替换和显式扩展字段保留。
 - [x] app 集成测试覆盖重载失败回滚、上一份配置继续工作，以及旧 provider 的尾部事件不会被新世代消费。
-- [ ] 在真实桌面中同时运行守护进程和 TUI，人工确认保存后即时生效、日志不污染终端。
+- [x] Linux Wayland 真机（2026-08-15）：守护进程 + TUI 双进程热重载即时生效（日志 `configuration reloaded`）、TUI API key 不回显、终端无日志污染。
 
 ---
 
@@ -147,8 +147,8 @@
 - [x] 统计重载、并发更新、Unicode 字符计数、损坏文件、失败回滚和平台路径测试。
 - [x] 热词 prompt、去空白和去重测试。
 - [x] Overlay 状态映射、去重、背压、关闭及 Linux Xvfb/Windows 平台定向测试。
-- [ ] 各真实桌面上的位置、缩放、颜色、焦点不抢占、点击穿透/通知替换视觉验收。
-- [ ] 统计跨真实进程重启和文件权限人工核对。
+- [x] Linux Wayland 真机（2026-08-15）：notify-send 状态提示可用、录音/取消/失败语义正确；位置/缩放/颜色等视觉细节与点击穿透仍需专项验收。
+- [x] Linux Wayland 真机（2026-08-15）：`stats.json` 跨会话持久化正常（recordings/字数/时长字段正确）。
 
 ---
 

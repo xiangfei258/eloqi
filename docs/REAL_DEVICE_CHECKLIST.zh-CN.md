@@ -1,8 +1,8 @@
 # Eloqui P2–P6 真机回归清单
 
-> 当前状态：**未执行**。
+> 当前状态：**Linux Wayland 已部分执行（2026-08-15）**，Linux X11 / macOS / Windows 未执行。
 >
-> 本清单由用户后续在真实设备上执行。mock、交叉编译、Xvfb、单元测试或远端 CI 都不能替代麦克风、全局热键、剪贴板、自动上屏、系统权限和 overlay 的人工验证。
+> 本清单由用户在真实设备上执行。mock、交叉编译、Xvfb、单元测试或远端 CI 都不能替代麦克风、全局热键、剪贴板、自动上屏、系统权限和 overlay 的人工验证。
 
 ---
 
@@ -36,6 +36,27 @@ ASR model：
 - 失败项修复后必须用同一环境重跑，不得只凭代码推断通过。
 - 日志、截图和录屏不得包含 API key 或敏感转写正文。
 - 一个平台只有在通用闭环、P2 状态机、P4 热重载、P5 统计/overlay 和对应平台专项全部通过后，才能标为真机通过。
+
+### 1.1 Linux Wayland 已执行记录（2026-08-15）
+
+```text
+日期：2026-08-15
+执行人：xiangchang24（用户）
+Eloqui commit：39f7443（含 P2–P6）
+eloqi --version：eloqi dev
+操作系统：Ubuntu（Linux amd64）
+桌面环境：GNOME Wayland（wayland-0）
+ASR：本机 sglang-omni（Docker 容器 moss-transcribe），model=/models/MOSS-Transcribe-Diarize
+热键/模式/停止延迟/上屏：Alt+Super / toggle / 800ms / auto_type=false（剪贴板模式）
+
+结果：部分通过
+通过项：通用闭环（Unicode+剪贴板+防重）、P2 停止缓冲/恢复录音/Esc 取消/R 重试、
+       P4 TUI 保存+热重载+API key 不回显、P5 stats 持久化+notify-send 提示、
+       doctor 七项全绿（evdev 可读 /dev/input/event3）。
+未执行项：hold 模式、0ms 停止延迟、modifier+Tab 反例、锁定键、自动重复、左右修饰键、
+          修饰键先松、auto_type 上屏、overlay 视觉细节（位置/缩放/颜色/点击穿透）。
+备注：会话日志 session 编号跳过取消的那次（Esc 生效的旁证）。
+```
 
 ---
 

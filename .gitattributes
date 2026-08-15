@@ -1,0 +1,11 @@
+# Keep source files byte-identical across Windows, Linux, and macOS runners.
+# In particular, gofmt treats CRLF checkouts as different from canonical Go
+# formatting, so Go sources must always be checked out with LF endings.
+*.go text eol=lf
+*.mod text eol=lf
+*.sum text eol=lf
+*.m text eol=lf
+*.h text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf

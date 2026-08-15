@@ -77,7 +77,12 @@ go build ./... && go vet ./... && go test -race ./...
 ## 提交规范
 
 - 每完成一个可验证的小步单独 commit，message 用 conventional commits（`feat:` / `chore:` / `fix:` 等）。
-- 提交前确保 build + vet + test -race 全绿、`gofmt -l .` 无输出、工作区干净。
+- 提交前确保 build + vet + test -race 全绿、仅针对仓库 Go 源码的格式检查无输出、工作区干净。不要让 `gofmt` 递归扫描 `.buildcache/mod`：
+
+  ```bash
+  unformatted="$(git ls-files -z --cached --others --exclude-standard -- '*.go' | xargs -0 gofmt -l)"
+  test -z "$unformatted" || { printf '%s\n' "$unformatted"; exit 1; }
+  ```
 
 ---
 

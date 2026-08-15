@@ -24,7 +24,7 @@
   - toggle：按一下开始录音，再按一下停止。
   - hold：按住说话，松开停止。
 - 热键必须限定为适合做全局快捷键的按键，避免和日常打字冲突：
-  - 允许：纯修饰键组合（如 Alt+Super、Ctrl+Alt）、功能键（F1–F24）、Tab、CapsLock、
+  - 允许：纯修饰键组合（如 Alt+Super、Ctrl+Alt）、功能键（F1–F24；macOS 因无公开虚拟键码仅支持 F1–F20）、Tab、CapsLock、
     方向键、Home/End/PageUp/PageDown、Insert/Delete、小键盘数字键。
   - 不允许：字母、数字、标点、空格等普通字符键。
 - 修饰键组合要求精确匹配：例如 Alt+Super 意味着按下这两个键时触发，按 Alt+Super+Tab

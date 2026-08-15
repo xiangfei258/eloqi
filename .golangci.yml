@@ -1,0 +1,28 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  settings:
+    errcheck:
+      # LazyProc.Call reports Win32 status through uintptr/Errno rather than a
+      # conventional Go error. Production paths check calls whose status
+      # affects correctness; cleanup, painting, and best-effort UI calls are
+      # intentionally unchecked.
+      exclude-functions:
+        - (*syscall.LazyProc).Call
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - misspell
+    - staticcheck
+    - unconvert
+    - unused
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

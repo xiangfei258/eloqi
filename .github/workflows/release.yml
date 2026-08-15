@@ -1,0 +1,144 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15-intel, macos-15, windows-latest]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install Linux build and display dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev pkg-config xvfb xauth
+      - name: Configure Windows race compiler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Get-Command gcc -ErrorAction SilentlyContinue) { exit 0 }
+          $gcc = @('C:\msys64\ucrt64\bin\gcc.exe', 'C:\msys64\mingw64\bin\gcc.exe') |
+            Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $gcc) { throw 'A MinGW GCC compiler is required for go test -race on Windows' }
+          Split-Path $gcc -Parent | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Check formatting
+        shell: bash
+        run: |
+          unformatted="$(git ls-files -z --cached --others --exclude-standard -- '*.go' | xargs -0 gofmt -l)"
+          test -z "$unformatted" || { printf '%s\n' "$unformatted"; exit 1; }
+      - run: go build ./...
+      - run: go vet ./...
+      - name: Test with race detector (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a go test -race ./...
+      - name: Test with race detector
+        if: runner.os != 'Linux'
+        run: go test -race ./...
+
+  lint:
+    name: Verify lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: sudo apt-get update && sudo apt-get install -y libx11-dev pkg-config
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.12.2
+
+  build:
+    name: ${{ matrix.asset }}
+    needs: [verify, lint]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: eloqi-linux-amd64
+          - os: macos-15-intel
+            asset: eloqi-darwin-amd64
+          - os: macos-15
+            asset: eloqi-darwin-arm64
+            goarch: arm64
+          - os: windows-latest
+            asset: eloqi-windows-amd64
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev pkg-config
+      - name: Build Unix binary
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          GOARCH: ${{ matrix.goarch || 'amd64' }}
+        run: |
+          go build -trimpath -ldflags="-s -w -X main.appVersion=${GITHUB_REF_NAME}" -o eloqi ./cmd/eloqi
+          package_root="${{ matrix.asset }}"
+          mkdir -p "$package_root/docs"
+          cp eloqi LICENSE THIRD_PARTY_NOTICES.md README.md README.zh-CN.md INSTALL.md CHANGELOG.md TASKS.md ELOQUI_DESIGN.md eloqi.toml.example "$package_root/"
+          cp docs/REAL_DEVICE_CHECKLIST.zh-CN.md "$package_root/docs/"
+          tar -czf "${{ matrix.asset }}.tar.gz" "$package_root"
+      - name: Build Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          go build -trimpath -ldflags="-s -w -X main.appVersion=$env:GITHUB_REF_NAME" -o eloqi.exe ./cmd/eloqi
+          $packageRoot = "${{ matrix.asset }}"
+          New-Item -ItemType Directory -Force -Path (Join-Path $packageRoot 'docs') | Out-Null
+          Copy-Item eloqi.exe,LICENSE,THIRD_PARTY_NOTICES.md,README.md,README.zh-CN.md,INSTALL.md,CHANGELOG.md,TASKS.md,ELOQUI_DESIGN.md,eloqi.toml.example -Destination $packageRoot
+          Copy-Item docs/REAL_DEVICE_CHECKLIST.zh-CN.md -Destination (Join-Path $packageRoot 'docs')
+          Compress-Archive -Path $packageRoot -DestinationPath "${{ matrix.asset }}.zip"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.asset }}
+          path: |
+            *.tar.gz
+            *.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum eloqi-* > SHA256SUMS
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          release_flags=(--generate-notes --verify-tag)
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            release_flags+=(--prerelease --latest=false)
+          fi
+          gh release create "${GITHUB_REF_NAME}" dist/* "${release_flags[@]}"

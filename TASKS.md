@@ -1,137 +1,178 @@
 # Eloqui 实现任务清单
 
-> 配套文档：ELOQUI_DESIGN.md（设计蓝图）。本文档把蓝图拆成可交付的分阶段任务，
-> 每个任务都带验收标准。执行时按 P0 → P1 → … 顺序，一个阶段验收通过再进下一个。
+> 配套文档：[ELOQUI_DESIGN.md](ELOQUI_DESIGN.md)（设计蓝图）。本文把蓝图拆成 P0–P6 可交付阶段。
 >
-> 原则：**只参考设计思想，代码用自己的表达重新编写**。目录结构、包名、命名风格
-> 均自行设计，保持原创性。
+> 勾选规则：只有“代码/文档已落地，并有当前工作区的本地自动化或可重复静态证据”才标为 `[x]`。真机、macOS 原生 SDK、远端 CI、tag 发布等未执行项即使已有代码或工作流，也保持 `[ ]`，避免把实现完成误写成验收完成。
 
-**已填充**：GitHub 用户名为 xiangchang24（module path 用）。
+模块路径：`github.com/xiangchang24/eloqi`。
 
 ---
 
 ## P0 — 项目初始化（脚手架）
 
-目标：一个干净的、可编译的 Go 项目骨架。
+目标：一个干净、可编译、有原创 MIT 许可的 Go 项目骨架。
 
-- [ ] `git init`，创建 `.gitignore`（忽略 build 产物、二进制、日志、本地配置）。
-- [ ] `go mod init github.com/xiangchang24/eloqi`。
-- [ ] 写 MIT `LICENSE` 文件。
-- [ ] 建目录骨架：`cmd/eloqi/`（入口）、`internal/`（平台能力层）、`plugins/`（业务插件）。
-- [ ] `cmd/eloqi/main.go` 写一个最小可运行入口（打印版本、退出）。
-- [ ] `README.md` 骨架：项目简介、状态、待办。
-- [ ] 首次提交。
+- [x] 初始化 Git，并配置 `.gitignore`。
+- [x] 初始化 Go module。
+- [x] 添加 MIT `LICENSE`。
+- [x] 建立 `cmd/eloqi/`、`internal/` 等目录骨架。
+- [x] 添加可运行入口和版本输出。
+- [x] 建立 README 与项目文档。
+- [x] 建立初始提交历史。
 
-**验收标准**：
-- `go build ./...` 通过。
-- `go vet ./...` 无输出。
-- `git log` 有初始提交，工作区干净。
+**自动化/静态验收**：
 
----
-
-## P1 — 平台能力层接口 + Linux 最小闭环
-
-目标：在 Linux 上跑通“按下热键 → 录音 → ASR 识别 → 输出文本”的最小闭环。
-
-### P1.1 定义平台能力接口（纯抽象，无平台实现）
-- [x] 定义 recorder 接口：启动、读音频、停止（返回剩余数据）。
-- [x] 定义 ASR 接口：连接、发送音频、结果回调、最终文本、关闭。
-- [x] 定义 clipboard 接口：读取、写入。
-- [x] 定义 autotype 接口：把文本注入当前焦点窗口。
-- [x] 定义 hotkey 接口：注册/注销热键、事件回调（按下/抬起边沿）。
-- [x] 每个接口配一个 mock 实现，供后续测试用。
-
-> 接口与 mock 位于 `internal/platform/`（接口）与 `internal/platform/mock/`（实现），
-> 单元测试覆盖 `go test -race ./...` 通过。
-
-### P1.2 Linux 平台实现
-- [x] recorder：调外部 `arecord`（ALSA，16kHz/16bit/mono raw PCM）。
-- [x] ASR：实现一个 OpenAI 兼容的非流式实现（录完上传，返回文本）。
-- [x] clipboard：`wl-copy`/`wl-paste`（Wayland）、`xclip`（X11）。
-- [x] autotype：写剪贴板后模拟粘贴（Wayland 用 wtype，X11 用 xdotool）。
-- [x] hotkey：Wayland 走 evdev，X11 走原生 X11（cgo + Xlib）。
-
-### P1.3 串起来（最小闭环）
-- [x] 一个极简 voice 逻辑：热键按下开始录音、再按停止、识别后写剪贴板/上屏。
-- [x] 配置项先用最简单形式（热键、ASR 地址/密钥，TOML）。
-
-**验收标准**：
-- [x] 在 Linux（Wayland，GNOME）真机验证：按热键（Alt+Super，toggle）说话，识别文本写入剪贴板。
-- [x] 核心逻辑（状态流转）有单元测试，`go test -race ./...` 通过。
-
-> **P1 已关闭（2026-08-14 真机验证通过）**。验证环境：GNOME Wayland，热键 `Alt+Super`
-> toggle，ASR 走本机 sglang-omni（`/models/MOSS-Transcribe-Diarize`），输出到剪贴板
-> （`auto_type=false`，识别结果已剥除 diarization 标记）。
-> 已知限制：GNOME Wayland 下 `wtype` 自动上屏不可用，故当前为剪贴板模式，需手动 Ctrl+V。
+- [x] 仓库有可追溯提交，许可证和 module path 与项目约定一致。
+- [x] P0 后续已被 P1–P6 全仓构建覆盖。
 
 ---
 
-## P2 — 显式状态机 + 关键健壮性（重点）
+## P1 — 平台能力接口 + Linux 最小闭环
 
-目标：把“快速连按、hold 快松、错误重试”这些易错场景做稳。
+目标：在 Linux 上跑通“热键 → 录音 → ASR → 剪贴板/上屏”最小闭环。
 
-- [ ] 引入显式录音状态机：idle / connecting / recording / stopping_delayed / stopping / error。
-- [ ] 支持 toggle 和 hold 两种模式，并区分修饰键-only 与功能键热键。
-- [ ] 实现停止延迟缓冲（默认约 800ms，可配置），缓冲期间再次按下取消停止。
-- [ ] 实现双输出防重：一次会话最终文本只输出一次。
-- [ ] 停止动作异步化：热键回调不阻塞，收尾（停录音、发最后音频、等结果、输出）走后台。
-- [ ] 出错状态保持一段时间，可重试；录音/收尾期间支持 Esc 取消。
-- [ ] 为状态机的全部合法转移写单元测试（table-driven）。
+### P1.1 平台接口与 mock
 
-**验收标准**：
-- 状态机所有转移有测试覆盖。
-- 快速连按 10 次、hold 快速点按，不崩溃、不重复输出、最终回到 idle。
-- `go test -race ./...` 通过。
+- [x] Recorder：启动、读取、停止并返回尾音频、关闭。
+- [x] ASRClient：连接、发送、结果回调、收尾、关闭。
+- [x] Clipboard、Autotype、Hotkey 接口及事件/按键类型。
+- [x] `internal/platform/mock/` 对应 mock 与单元测试。
+
+### P1.2 Linux 后端
+
+- [x] `arecord`：16 kHz、16 bit、单声道 raw PCM。
+- [x] OpenAI 兼容非流式 ASR 客户端。
+- [x] Wayland `wl-copy`/`wl-paste` 与 X11 `xclip`。
+- [x] Wayland `wtype` 与 X11 `xdotool` 自动上屏。
+- [x] Wayland evdev 与原生 X11 全局热键。
+
+### P1.3 最小闭环与加固
+
+- [x] voice 最小闭环、TOML 配置和应用装配。
+- [x] evdev release 配对、modifier-only 观察窗、X11 锁定修饰键变体和自动重复加固。
+- [x] arecord 有界缓冲、阻塞 Read 唤醒、尾音频和错误传播。
+- [x] diarization 清理改为显式选择且只匹配完整结构。
+
+**验收状态**：
+
+- [x] 2026-08-14 在 GNOME Wayland 完成 P1 原始闭环真机验证：`Alt+Super` toggle、本机兼容 ASR、剪贴板输出。
+- [x] Linux 自动化 build/vet/race 已覆盖当前 P1 代码。
+- [ ] P1 热键加固后的统一真机复测：普通 hold、toggle、modifier-only、modifier+Tab 反例、锁定键、自动重复和修饰键先松场景。
+
+> GNOME Wayland 已知边界：`wtype` 在部分桌面不可用；此时使用 `output.auto_type = false`，转写只进入剪贴板。
 
 ---
 
-## P3 — 补齐 macOS 和 Windows
+## P2 — 显式状态机 + 关键健壮性
 
-目标：三平台能力全覆盖（按 ELOQUI_DESIGN.md 第 4 节平台矩阵实现）。
+目标：稳定处理快速连按、hold 快松、收尾竞态、取消和重试。
 
-- [ ] macOS：CGEventTap 热键、CoreAudio 录音、NSPasteboard 剪贴板、原生键盘注入、NSPanel 胶囊。
-- [ ] Windows：热键轮询 + 低级钩子、WinMM 录音、Unicode 剪贴板、SendInput 上屏、Win32 胶囊。
-- [ ] 各平台用 build tags 隔离，共用接口不变。
+- [x] 显式状态机：idle / connecting / recording / stopping_delayed / stopping / error。
+- [x] toggle、hold、modifier-only 与功能键交互。
+- [x] 默认 800ms、可配置且可显式设为 0 的停止延迟；缓冲期间可恢复录音。
+- [x] 会话 ID + 原子认领，保证最终文本只输出一次。
+- [x] 录音启动、停止、尾音频发送、Finalize、Close 与输出从热键事件循环异步解耦。
+- [x] 活动态 Escape 取消；错误态 R 用全新 Recorder/ASR 重试；错误超时回 idle。
+- [x] 状态和会话钩子使用有序无界分发，`Stop` 返回前排空回调。
+- [x] 合法/非法转移、快速连按、快松、取消、重试、防重和回调背压单元测试。
 
-**验收标准**：
-- 三平台各自构建通过（macOS 需在 mac 上 cgo 构建）。
-- 每平台至少真机验证一次“录音→识别→输出”闭环。
+**自动化验收**：
+
+- [x] `internal/voice` 在 Linux 下定向 `go test -race -count=3` 通过。
+- [x] 快速连按 10 次与 hold 快速点按测试最终回 idle，且无重复输出。
+- [x] Linux + Xvfb 全仓 race 对当前 P2 代码通过。
+- [ ] P2 真机回归：hold/toggle、停止缓冲恢复、0ms 延迟、Escape、R、错误 overlay 与资源释放。
 
 ---
 
-## P4 — 产品化：TUI + 配置热重载 + doctor
+## P3 — macOS 与 Windows 平台能力
 
-- [ ] TUI 配置界面（热键、模式、ASR 引擎/密钥、自动上屏、停止延迟、热词、语言）。
-- [ ] 配置热重载（监听目录，配置变化即时生效）。
-- [ ] doctor 启动环境检查：检测缺失依赖并给出可操作的修复提示。
-- [ ] TUI 模式日志进文件、不污染界面。
+目标：按 build tags 补齐三平台能力，同时保持已锁定接口不变。
 
-**验收标准**：
-- 在 TUI 里改配置保存后立即生效，无需重启。
-- doctor 在缺依赖时给出明确、可执行的提示。
+- [ ] macOS：CGEventTap、AudioQueue、NSPasteboard、Command+V 注入、NSPanel helper 的源码已实现；仍需真实 macOS SDK 编译，因此暂不勾选完成。
+- [x] Windows：GetAsyncKeyState + 观察式低级钩子、WinMM、Unicode 剪贴板、SendInput、非激活 Win32 overlay 已实现并通过本地自动化。
+- [x] Linux / macOS / Windows 后端通过 build tags 隔离，锁定平台接口未改名、未加方法、未删字段。
+- [x] Windows Unicode、音频格式/缓冲、热键边沿、原生符号和 overlay 状态测试。
+- [x] macOS 不依赖 cgo 的热键/overlay 状态辅助测试可为 amd64 与 arm64 交叉编译。
+
+**自动化/构建验收**：
+
+- [x] Linux 全仓 build/vet/race（Xvfb）通过。
+- [x] Windows amd64 全仓 build/vet/test 通过；定向 386 测试和 arm64 平台包/主程序交叉编译通过；WinMM 所有权失败、停止唤醒失败和有界 quarantine 路径已做重复故障注入与 checkptr 验证。
+- [ ] macOS Intel 原生 Objective-C/cgo build、vet、race（需要 macOS SDK）。
+- [ ] macOS Apple Silicon 原生 Objective-C/cgo build、vet、race（需要 macOS SDK）。
+
+**真机验收**：
+
+- [ ] Linux Wayland。
+- [ ] Linux X11。
+- [ ] macOS Intel。
+- [ ] macOS Apple Silicon。
+- [ ] Windows。
+
+---
+
+## P4 — 产品化：TUI + 热重载 + doctor
+
+- [x] 终端配置编辑器覆盖热键、模式、ASR 引擎/密钥、自动上屏、停止延迟、热词和语言。
+- [x] 交互式 API key 输入关闭终端回显；已有 key 只显示“已配置”状态。
+- [x] TUI 原子保存，并保留注释与显式扩展 TOML 节/字段（`plugin.*`/`x-*`、`x_`）；其他未知项拒绝。
+- [x] 目录级配置 watcher：轮询、内容摘要、防抖、校验、异步有界回调与安全 Close。
+- [x] 应用运行时热重载；每个运行世代独占 Hotkey provider，新配置无效或新热键注册失败时用全新 provider 恢复旧配置。
+- [x] `--doctor` 检查 Linux 依赖、Wayland evdev 实际可读性与 macOS/Windows 权限提示。
+- [x] TUI 结构化日志只写用户缓存文件，不污染交互界面。
+- [x] CLI 与 app 装配测试覆盖 TUI、doctor、正常运行、热重载和退出清理。
+
+**自动化验收**：
+
+- [x] `internal/config` watcher 在阻塞回调、自 Close、并发 Close 和原子 rename 场景下通过 race 测试。
+- [x] `internal/doctor` 对 Wayland/X11 分支、依赖缺失和 evdev 权限提示有单元测试。
+- [x] `internal/tui` 覆盖完整字段 round-trip、取消、密钥保护、原子替换和显式扩展字段保留。
+- [x] app 集成测试覆盖重载失败回滚、上一份配置继续工作，以及旧 provider 的尾部事件不会被新世代消费。
+- [ ] 在真实桌面中同时运行守护进程和 TUI，人工确认保存后即时生效、日志不污染终端。
 
 ---
 
 ## P5 — 体验完善
 
-- [ ] 录音历史统计（次数、字数、时长）并持久化。
-- [ ] 热词增强识别。
-- [ ] 录音状态胶囊（overlay）在各平台打磨（位置、缩放、颜色）。
-- [ ] 错误提示与重试交互完善。
+- [x] 本地统计：成功录音次数、总/最近 Unicode 字符数、总/最近时长和更新时间。
+- [x] 统计采用同目录临时文件 + sync + rename；持久化失败时回滚内存值。
+- [x] ASR 热词经规范化/去重后作为 OpenAI 兼容 prompt 发送。
+- [x] Overlay 抽象、mock 和异步 controller；状态更新不阻塞 voice 主流程。
+- [x] Linux X11 原生胶囊、Wayland `notify-send` 回退、macOS NSPanel 和 Windows Win32 后端源码。
+- [x] 错误 overlay、R 重试、Escape 取消与取消/失败会话不计统计。
 
-**验收标准**：
-- 统计数据跨重启保留。
-- 胶囊在录音全流程状态清晰可见。
+**自动化验收**：
+
+- [x] 统计重载、并发更新、Unicode 字符计数、损坏文件、失败回滚和平台路径测试。
+- [x] 热词 prompt、去空白和去重测试。
+- [x] Overlay 状态映射、去重、背压、关闭及 Linux Xvfb/Windows 平台定向测试。
+- [ ] 各真实桌面上的位置、缩放、颜色、焦点不抢占、点击穿透/通知替换视觉验收。
+- [ ] 统计跨真实进程重启和文件权限人工核对。
 
 ---
 
 ## P6 — 工程化与发布
 
-- [ ] CI：三平台矩阵（build + test -race + lint）。
-- [ ] 引入 golangci-lint，配置合理的 linter 集合。
-- [ ] 发布打包（各平台归档 + 校验和）。
-- [ ] README 双语、CHANGELOG、安装说明完善。
+- [ ] 三平台 GitHub Actions CI 文件已编写，但当前 Gitee `origin` 不执行 `.github/workflows`，尚无远端运行证据。
+- [x] `.golangci.yml` 已添加；最终 Linux 与 Windows 本地全仓 `golangci-lint` 均为 `0 issues`（GitHub lint job 仍随远端 CI 待验收）。
+- [ ] `v*` tag 的 Linux amd64、macOS amd64/arm64、Windows amd64 打包与 `SHA256SUMS` 工作流已编写，尚未真实发布验证。
+- [x] `README.md` / `README.zh-CN.md`、`INSTALL.md`、`CHANGELOG.md`、配置示例、交接和真机清单已整理。
+- [x] 发布构建支持通过 `-ldflags -X main.appVersion=<tag>` 注入版本，本地构建显示 `dev`。
+- [x] Linux `tar.gz` 与 Windows `zip` 本地发布 smoke 通过：版本注入、单一顶层目录、必需资产、文档相对链接和 SHA-256 回验均正确。
 
-**验收标准**：
-- 推 tag 能自动出三平台安装包。
-- CI 全绿。
+**发布验收**：
+
+- [ ] 把仓库同步到 GitHub 后，三平台 CI 全绿。
+- [ ] 推送测试 `v*` tag，确认四个归档、Release notes 和 `SHA256SUMS` 均生成。
+- [ ] 下载归档并核对校验和、版本输出和最小启动。
+- [ ] 完成 [docs/REAL_DEVICE_CHECKLIST.zh-CN.md](docs/REAL_DEVICE_CHECKLIST.zh-CN.md) 对应平台项。
+
+---
+
+## 当前结论（2026-08-15）
+
+- P0、P1、P2 的代码与既有自动化证据已闭合；P1 加固后和 P2 真机回归仍待执行。
+- P3 的 Windows 自动化证据已具备；macOS 原生 SDK 构建和所有平台真机仍是硬阻塞项。
+- P4、P5 的实现和自动化覆盖已落地；真实桌面交互与视觉验收未做。
+- P6 文档、工作流、本地 lint 和本地归档 smoke 已闭合；远端 GitHub CI、真实 tag 发布、下载归档复核和真机验收仍未闭合。

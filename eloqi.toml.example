@@ -1,30 +1,54 @@
-# Eloqui 示例配置。
+# Eloqui 完整示例配置 / Complete example configuration
 #
-# 用法：复制为 ~/.config/eloqi/config.toml 或 ./eloqi.toml，填好 ASR 后端后运行。
-# 所有字段均可省略，省略时使用内置默认值（热键 Ctrl+Alt+F1、hold 模式、自动上屏）。
-# 注意：当前 TOML 解析器是 P1 的最小实现，请按下面这种扁平写法填写。
+# 建议复制为 ./eloqi.toml，再通过 --config 显式指定。
+# Copy to ./eloqi.toml and pass it explicitly with --config.
+#
+# 注意：正常运行要求 endpoint 是带 host 的绝对 http/https URL，且 api_key、model 非空。不要提交真实 API key；
+# 类 Unix 系统建议 chmod 600 eloqi.toml。
 
 [hotkey]
-# mods：用 + 分隔的修饰键（ctrl / alt / super / shift），可留空表示裸键。
+# 用 + 分隔修饰键：Ctrl / Alt / Super / Shift；可留空。
+# Modifiers separated by +. Leave empty for a bare allowed key.
 mods = "Ctrl+Alt"
-# key：非修饰键（F1..F24 / Tab / CapsLock / 方向键 / Home / End / PageUp / PageDown /
-#      Insert / Delete / Num0..Num9），留空表示纯修饰键组合（如 Alt+Super）。
+
+# 允许 F1..F24（macOS 支持 F1..F20）、Tab、CapsLock、Left/Right/Up/Down、Home/End、
+# PageUp/PageDown、Insert/Delete、Num0..Num9。
+# 留空时表示纯修饰键组合，例如 mods="Alt+Super"、key=""。
 key = "F1"
-# mode：hold（按住说话，松开停止）或 toggle（按一下开始，再按一下停止）。
+
+# hold：按住说话，松开停止；toggle：按一次开始，再按一次停止。
 mode = "hold"
 
+# 停止手势后继续收录话尾的毫秒数；默认 800，设为 0 可关闭延迟。
+# During stopping_delayed，再次触发主热键会恢复同一次录音；Escape 取消。
+stop_delay_ms = 800
+
 [asr]
-# endpoint：OpenAI 兼容的转写接口完整 URL。
+# 当前只支持 openai-compatible。
+engine = "openai-compatible"
+
+# OpenAI 兼容的音频转写接口完整 URL。
 endpoint = "https://api.openai.com/v1/audio/transcriptions"
-# api_key：Bearer 令牌。
-api_key = "sk-your-api-key"
-# model：转写模型名。
+
+# 作为 Authorization: Bearer <key> 发送。可信的本地无鉴权后端也需要非空占位值。
+api_key = "sk-replace-me"
+
+# 后端模型名。
 model = "whisper-1"
-# language：可选的 BCP-47 语言提示（如 zh-CN），留空表示服务端自动检测。
+
+# 可选语言提示；留空由服务端自动检测。是否接受 zh-CN 等格式取决于后端。
 language = "zh-CN"
-# Only enable for backends that return [timestamp][speaker] transcripts.
+
+# 热词会去空白、按首次出现顺序去重，并作为识别 prompt 发送；合并后上限 8192 字节。
+# 使用 TOML 字符串数组，不要写成逗号分隔的单个字符串。
+hotwords = ["Eloqui", "Go", "OpenAI"]
+
+# 仅对返回完整 [timestamp][speaker] 结构的后端开启。
+# 默认 false，避免把“参考文献[1]”等普通方括号文本误删。
 strip_diarization = false
 
 [output]
-# auto_type：true 表示识别后模拟粘贴直接上屏；false 表示只写入剪贴板。
+# true：先写剪贴板，再模拟粘贴到当前焦点应用。
+# false：只写剪贴板，适合首次运行和 GNOME Wayland 等自动上屏受限环境。
+# Linux true 需要 Wayland 的 wtype 或 X11 的 xdotool。
 auto_type = true

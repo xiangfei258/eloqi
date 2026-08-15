@@ -1,130 +1,218 @@
-# 项目交接文档（HANDOFF）
+# Eloqui 项目交接文档
 
-> 用途：新工作目录 / 新对话接入本项目的唯一入口。读完本文即可接上全部上下文，
-> 无需再回顾之前的对话。
+> 最近核对：2026-08-15。
+>
+> 新对话或新工作目录请按顺序阅读：`ELOQUI_DESIGN.md` → `TASKS.md` → 本文 → 相关源码/测试。阶段勾选与验收边界以 `TASKS.md` 为准。
 
 ---
 
-## 1. 项目概况
+## 1. 项目快照
 
-| 项 | 值 |
+| 项 | 当前值 |
 |---|---|
-| 项目名 | **Eloqui** |
-| 定位 | 跨平台桌面语音输入工具（热键 → 录音 → ASR 识别 → 剪贴板/上屏） |
-| 语言 | Go |
-| 许可证 | **MIT** |
-| 目标平台 | Linux（Wayland + X11）、macOS、Windows，三平台全支持 |
-| 目录 | `/home/xiangchanglin/projects/eloqi` |
-| GitHub 用户名 | `xiangchang24` |
-| module path | `github.com/xiangchang24/eloqi` |
-| MIT 版权行 | `Copyright (c) 2026 xiangchang24` |
+| 项目 | Eloqui，跨平台桌面语音输入（热键 → 录音 → ASR → 剪贴板/自动上屏） |
+| 语言 / module | Go 1.25 / `github.com/xiangchang24/eloqi` |
+| 许可证 | MIT，`Copyright (c) 2026 xiangchang24` |
+| 目标平台 | Linux Wayland、Linux X11、macOS、Windows |
+| 当前 Windows 工作区 | `D:\eloqi` |
+| 远端 | `origin = https://gitee.com/xiangchang24/eloqi.git` |
+| 主分支 | `master` |
+| 当前发布状态 | 尚无经过 CI、tag 和真机共同验收的正式发布 |
 
 ---
 
-## 2. 背景与由来（务必先读）
+## 2. 合规红线
 
-Eloqui 是**参考一个已存在的 GPL v3 开源项目「just-talk-go」从头重写**的新项目。
+Eloqui 只参考 GPL v3 项目 just-talk-go 的功能思想，从零编写 MIT 原创实现。
 
-关键事实：
-- 原项目 just-talk-go 位于 `/home/xiangchanglin/projects/just-talk-go`，
-  许可证 **GPL v3**，作者 `whoamihappyhacking`。
-- 原项目代码**不能照抄、不能改名换 MIT**——那违反 GPL copyleft，也不符合用户意愿。
-
-**合规红线（不可违背）**：
-1. Eloqui 只**参考原项目的功能、架构思想、平台技术选型**（这些属“思想层”，合法）。
-2. **代码必须用自己的表达重写**：目录结构、包名、函数名、注释、实现细节都自行设计，
-   不逐行翻译、不复制原项目文件。
-3. Eloqui 用 **MIT**，因此它必须是**原创代码**，不能是 GPL 代码的衍生品。
+- 禁止读取、复制、逐行翻译 `/home/xiangchanglin/projects/just-talk-go` 的源码。
+- 不得沿用其目录结构、包名、函数名、注释或实现细节。
+- 旧目录即使仍存在，也只能视为不可访问边界。
+- 平台接口以 `AGENTS.md` 锁定签名为准，不改名、不加方法、不删字段。
 
 ---
 
-## 3. 已确定的关键决策（既定事实，勿再推翻）
+## 3. 当前架构与入口
 
-- 项目名 **Eloqui**（拉丁语“雄辩地说”）。
-- 技术栈 **Go**（单二进制、交叉编译、goroutine 契合流式并发；不换 Rust/Electron）。
-- 三平台能力全保留。
-- 全新 git 历史（不继承原项目 commit）。
-- 架构：核心引擎 + 可插拔插件 + 平台能力层（build-tags 隔离平台差异）。
+```text
+cmd/eloqi
+  └─ internal/app        CLI、doctor、平台装配、运行时与热重载
+       ├─ internal/config   TOML + 目录 watcher
+       ├─ internal/doctor   环境与权限检查
+       ├─ internal/logging  slog 结构化日志
+       ├─ internal/voice    P2 状态机和会话编排
+       ├─ internal/asr      OpenAI 兼容非流式 ASR
+       ├─ internal/stats    本地持久化统计
+       ├─ internal/overlay  voice 状态到平台 overlay 的异步映射
+       └─ internal/platform Linux / darwin / windows / mock
+```
+
+正常运行路径：加载配置 → doctor → 初始化日志/统计/平台能力/overlay → 启动 voice runtime → 监听配置目录 → 收到退出信号后依次关闭 watcher、voice、overlay 和 hotkey。
+
+CLI：
+
+```text
+eloqi [--config PATH] [--debug]
+eloqi --doctor [--config PATH]
+eloqi --tui [--config PATH] [--debug] [--log-file PATH]
+eloqi --version
+```
+
+`--tui` 只编辑并保存配置，不启动守护进程。验证热重载时应另开一个终端运行 TUI。
 
 ---
 
-## 4. 已产出的文档（都在 eloqi/ 目录）
+## 4. P0–P6 当前进度与证据
 
-| 文件 | 作用 |
+### P0 / P1
+
+- 项目骨架、MIT、module、平台接口/mock 和 Linux 最小闭环已完成。
+- 2026-08-14 曾在 GNOME Wayland 做过 P1 原始闭环真机验证：`Alt+Super` toggle，本机兼容 ASR，输出到剪贴板。
+- 后续已经加固 evdev/X11 热键、arecord 停止/尾音频和错误传播，但这些加固后的真机回归还没做。
+- GNOME Wayland 下 `wtype` 存在桌面兼容限制；可设 `output.auto_type=false` 使用剪贴板模式。
+
+### P2
+
+- 显式状态：idle / connecting / recording / stopping_delayed / stopping / error。
+- hold/toggle、纯修饰键/功能键、默认 800ms 且允许显式 0 的停止缓冲。
+- 会话 ID + 原子认领防止最终回调与 `Finalize` 重复输出。
+- Escape 取消、R 使用全新 Recorder/ASR 重试、错误超时回 idle。
+- 状态/会话回调按序分发，外部回调不持有 voice 内部锁，`Stop` 等待内部回调排空。
+- Linux 定向 `internal/voice go test -race -count=3` 已通过；真机待测。
+
+### P3
+
+Windows 源码和本地自动化：
+
+- GetAsyncKeyState 轮询 + 观察式 `WH_KEYBOARD_LL` 边沿回退；钩子不消费、不重放按键。
+- WinMM 16 kHz/16 bit/mono PCM、有界缓冲和 Stop 唤醒。
+- Win32 Unicode 剪贴板、SendInput Ctrl+V、非激活/置顶/点击穿透 overlay。
+- Windows amd64 全仓 build/vet/test 通过；定向 386 测试和 arm64 平台包/主程序交叉编译通过。
+- WinMM 对原生 `WAVEHDR`/样本/Pinner 的所有权只在 unprepare 和 close 成功后释放；失败或 pump 无法在 2 秒内确认退出时保留完整资源并强引用 quarantine，Stop/Close 有界返回。故障注入重复测试、checkptr 和 vet 已通过。
+
+macOS 源码和当前边界：
+
+- CGEventTap、AudioQueue、NSPasteboard、Command+V、NSPanel helper 的 Objective-C/cgo 源码已存在。
+- 不依赖 cgo 的热键/overlay 状态逻辑已为 amd64/arm64 交叉编译。
+- **尚未在带 macOS SDK 的机器上编译 Objective-C/cgo 原生桥**，不得写成 macOS 构建通过。
+
+所有平台的 P3 真机闭环均待本轮统一清单执行。
+
+### P4
+
+- 逐项终端配置编辑器已接入：热键、模式、ASR 引擎/endpoint/key/model、自动上屏、停止延迟、热词、语言。
+- 交互式终端输入 API key 时关闭回显；已有 key 不输出明文。
+- TUI 采用同目录临时文件 + sync + rename 原子保存，并保留注释与显式扩展（`plugin.*`/`x-*` 节、`x_` 字段）；其他未知配置和错误布尔值直接拒绝。
+- watcher 监听目录并重开目标路径，支持原子替换；默认 100ms 轮询、200ms 防抖。
+- watcher 回调与轮询解耦，阻塞回调不妨碍内部关闭；Close 可并发/重复/在回调内调用。
+- runtime 热重载会校验配置；每个运行世代独占 Hotkey provider。旧 Voice 停止并关闭旧 provider 后才创建新世代，失败回滚也使用全新 provider，旧事件尾部不会进入新 Voice。
+- doctor 在 Wayland 实际尝试打开 `/dev/input/event*`，X11 不误报 evdev；依赖提示可操作。
+- TUI 日志只进系统用户缓存文件；app 装配与 P4 包的集成/race 测试已通过。
+
+仍需在真实桌面人工确认：守护进程 + TUI 双进程热重载、终端不被日志污染、热键资源切换正确。
+
+### P5
+
+- 成功会话统计：次数、总/最近 Unicode 字符数、总/最近录音毫秒数、更新时间。
+- Linux 默认 `$XDG_STATE_HOME/eloqi/stats.json`，否则 `~/.local/state/eloqi/stats.json`；macOS 为 `~/Library/Application Support/eloqi/stats.json`；Windows 为 `%AppData%\eloqi\stats.json`；`ELOQUI_STATE_DIR` 可覆盖父目录。
+- 统计每次原子持久化，失败回滚内存；取消和失败会话不计入。
+- `asr.hotwords` 是 TOML 字符串数组，去空白/去重后作为 OpenAI 兼容 prompt 发送。
+- overlay controller 异步映射连接、录音、停止缓冲、等待结果、错误；idle 隐藏。
+- Linux X11 用原生 Xlib 胶囊，Wayland 用 `notify-send` 回退；macOS 为 NSPanel helper；Windows 为 Win32 窗口。
+- Overlay 不可用或更新失败只记 warning，不中断 voice 主流程。
+- 统计、热词、controller 和 Linux Xvfb/Windows overlay 定向测试已通过；所有真实视觉验收待做。
+
+### P6
+
+已落地但未完成远端验收：
+
+- `.github/workflows/ci.yml`：Linux/macOS/Windows build、vet、race，Linux Xvfb，golangci lint。
+- `.github/workflows/release.yml`：`v*` tag 构建 Linux amd64、macOS amd64/arm64、Windows amd64，归档并生成 `SHA256SUMS`，调用 `gh release`。
+- `.golangci.yml`、版本 `-ldflags -X main.appVersion=<tag>`、第三方许可证声明、双语 README、安装、CHANGELOG、配置示例和真机清单。
+- Actions 均固定到已核验 commit SHA；工作流默认 `contents: read`，只有 publish job 获得 `contents: write`，且 build/publish 受四个 runner 的 verify 与 Linux lint 门禁。
+
+关键边界：当前 `origin` 是 **Gitee**，不会运行 `.github/workflows`。需建立/同步 GitHub 仓库后再把 CI、Release 和 tag 任务勾为完成。当前没有远端 CI 全绿或真实 tag 发布证据。
+
+---
+
+## 5. 当前自动化验证记录
+
+已确认：
+
+- Linux + Xvfb：最终快照全仓 `go build ./...`、`go vet ./...`、`go test -race ./...`；Linux 全仓 golangci-lint 为 `0 issues`。
+- Linux 定向：voice、app 热键世代隔离、X11/overlay race 重复。
+- Windows amd64：最终快照全仓 build/vet/test；Windows 全仓 golangci-lint 为 `0 issues`。
+- Windows 386：平台定向测试、checkptr 和 vet。
+- Windows arm64：平台测试包和主程序交叉编译。
+- macOS amd64/arm64：仅 cgo-free helper 交叉编译，不代表原生后端构建。
+- P6 静态/本地：actionlint v1.7.12 通过；仓库 11 份 Markdown 的 27 个本地链接无缺失；Linux/Windows 归档 smoke 的版本、资产、目录结构、归档内链接和 SHA-256 回验通过。
+
+尚未确认：
+
+- macOS 原生 cgo build/vet/race。
+- GitHub 托管 runner 的三平台工作流。
+- tag 打包、Release 创建、下载和校验和核对。
+- P2–P5 真机清单。
+
+---
+
+## 6. 构建与验证约束
+
+所有 Go 命令先设置仓库内缓存：
+
+```bash
+export GOCACHE="$PWD/.buildcache" GOMODCACHE="$PWD/.buildcache/mod"
+```
+
+提交前最低检查：
+
+```bash
+unformatted="$(git ls-files -z --cached --others --exclude-standard -- '*.go' | xargs -0 gofmt -l)"
+test -z "$unformatted" || { printf '%s\n' "$unformatted"; exit 1; }
+go build ./...
+go vet ./...
+go test -race ./...
+golangci-lint run
+```
+
+Linux 无真实显示服务时使用：
+
+```bash
+xvfb-run -a go test -race ./...
+```
+
+Windows PowerShell 缓存写法见 `INSTALL.md`。macOS 原生代码只能在带 SDK 的 macOS 上有效构建，不能用 Windows/Linux 的普通交叉编译替代。
+
+---
+
+## 7. 下一步（按顺序）
+
+1. 建立或同步 GitHub 仓库，触发 CI；尤其确认 macOS Intel/Apple Silicon 的原生 Objective-C/cgo 编译与 race。
+2. 按 [docs/REAL_DEVICE_CHECKLIST.zh-CN.md](docs/REAL_DEVICE_CHECKLIST.zh-CN.md) 做 Linux Wayland、Linux X11、Windows、macOS 真机回归；用户已明确这些后续再执行，因此当前不要代填“通过”。
+3. CI 与真机问题修完后推测试 `v*` tag，核对四个归档、`eloqi --version`、Release notes 和 `SHA256SUMS`。
+4. 只有第 1–3 步闭合后，才把 P3/P6 和对应发布验收标为完成。
+
+---
+
+## 8. 文档索引
+
+| 文件 | 用途 |
 |---|---|
-| `ELOQUI_DESIGN.md` | 设计蓝图：功能规格、架构、平台能力矩阵、关键设计决策 |
-| `TASKS.md` | 分阶段任务清单 P0–P6，每阶段带验收标准 |
-| `P0_BRIEF.md` | P0 的详细执行简报：含具体命令和文件内容建议 |
-
-执行顺序：先读 `ELOQUI_DESIGN.md` 理解全局，再按 `TASKS.md` 从 P0 开始，
-P0 的逐条命令看 `P0_BRIEF.md`。
-
----
-
-## 5. 当前进度
-
-- [x] 项目命名、许可证、module path 已定。
-- [x] 三份文档（设计蓝图 / 任务清单 / P0 简报）已写好，占位符已填充。
-- [x] **P0 项目脚手架已完成**：git 已 init、首次提交已建立，工作区干净。
-- [x] **P1.1 平台能力接口 + mock 已完成**：见 `internal/platform/`（接口）与
-      `internal/platform/mock/`（mock），`go test -race ./...` 通过。
-- [x] **P1.2 + P1.3 代码已完成并提交**（`a85ef45`）：Linux 后端
-      （`internal/platform/linux/`）、OpenAI 非流式 ASR（`internal/asr/`）、TOML 配置
-      （`internal/config/`）、voice 最小闭环（`internal/voice/`）、装配（`internal/app/`）。
-      build/vet/`go test -race` 全绿。
-- [x] **P1 真机验证通过（2026-08-14，热键修复前）**：GNOME Wayland，热键
-      `Alt+Super` toggle，本机 sglang-omni 转写，识别文本写入剪贴板。已知限制：
-      GNOME Wayland 下 `wtype` 自动上屏不可用，当前为剪贴板模式（手动 Ctrl+V）。
-- [x] **P1 审查缺陷修复已完成**：
-      - evdev 普通热键 release 与原始 press 绑定配对，修饰键先松不再丢边沿；
-      - evdev / X11 modifier-only 增加 150ms 观察窗，期间出现其他键会取消候选；
-      - X11 全部 Xlib 调用收敛到单 goroutine，启用 XKB detectable auto-repeat；
-      - X11 为 CapsLock / NumLock / ScrollLock 等锁定修饰键注册全部变体；
-      - X11 同步检查 `XGrabKey` 的异步协议错误，热键被占用时会回滚部分 grab
-        并向上层返回错误；旧式自动重复 release/press 对不再产生假松键；
-      - X11 从 keymap 跟踪全部左右修饰键，普通组合与 modifier-only 都按当前物理状态
-        精确匹配，松开左/右同类键之一不会误判整组松开；
-      - X11 关闭使用独立停止信号并等待事件循环收尾，即使队列已满或响应与
-        `done` 同时到达，`Close` 也会稳定返回并关闭 `Events`；
-      - voice 聚合 recorder / ASR / 输出错误并传给 OnResult，不再用 Finalize 成功掩盖前置失败；
-      - session 在 recording 与 finalization 期间保持 current，禁止重叠上传并让 Stop 等待收尾；
-      - arecord 改为内部泵 + 有界缓冲，Stop 可唤醒阻塞 Read；
-      - arecord 的自然 EOF、进程退出和泵读取错误会传给上层；Stop 超时后升级为
-        Kill，停止期尾音频仍受 1 MiB 上限约束；
-      - diarization 清理默认关闭，且只处理完整转写结构，不破坏 `参考文献[1]` 等普通文本。
-- [ ] **热键修复后需重新真机验证**：至少覆盖普通 hold 键、toggle 键、modifier-only、
-      modifier+Tab 反例、CapsLock/NumLock 开关、长按自动重复、Ctrl 先松再松功能键。
-- [ ] 其余阶段（P2–P6）未开始。
+| `AGENTS.md` | 代理规则、接口锁定、合规和验证要求 |
+| `ELOQUI_DESIGN.md` | 产品/架构/平台设计蓝图 |
+| `TASKS.md` | P0–P6 勾选状态与验收边界 |
+| `README.md` / `README.zh-CN.md` | 用户入口与当前验证状态 |
+| `INSTALL.md` | 三平台依赖、权限、构建、首次运行 |
+| `CHANGELOG.md` | Unreleased 变更与验证边界 |
+| `eloqi.toml.example` | 完整配置字段示例 |
+| `docs/REAL_DEVICE_CHECKLIST.zh-CN.md` | 真实设备/桌面人工回归步骤 |
 
 ---
 
-## 6. 下一步（接上后该做什么）
+## 9. 不要误报的事项
 
-1. 进入 **P2**：显式状态机（idle/connecting/recording/stopping_delayed/stopping/error）
-   + 停止延迟缓冲 + 双输出防重 + 停止异步化，并补齐状态机全部转移的单测。
-2. 之后按 P3 → P4 → … 推进，每阶段对照 `TASKS.md` 的验收标准。
-
-> 环境提示：本机 Go 默认 `GOCACHE`/`GOMODCACHE` 位于 `/home/xiangchanglin/...`，
-> 在受限 shell 下只读；构建前先 `export GOCACHE="$PWD/.buildcache"
-> GOMODCACHE="$PWD/.buildcache/mod"`（该目录已被 .gitignore 忽略）。
-
----
-
-## 7. 架构要点速记（详细见 ELOQUI_DESIGN.md）
-
-- 分层：入口 → 配置/环境检查 → 热键 Provider 工厂 → 引擎 → 插件（voice、overlay）
-  → 平台能力层（hotkey / recorder / clipboard / autotype / overlay）。
-- 平台矩阵（技术选型）：Wayland 热键用 evdev、X11 用原生 X11、macOS 用 CGEventTap、
-  Windows 用轮询 + 低级钩子；录音分别是 arecord / CoreAudio / WinMM。
-- 关键设计：显式录音状态机（idle/connecting/recording/stopping_delayed/stopping/error）、
-  停止延迟缓冲、双输出防重、停止动作异步化。
-
----
-
-## 8. 注意事项
-
-- 旧项目 `just-talk-go` 目录**暂时保留**（源码勿看勿抄，GPL 合规红线）。其后台
-  `just-talk --no-tui` 进程已停止，删旧目录前无需再 kill；如需再跑，注意别与新 Eloqui
-  抢同一热键或麦克风。
-- Eloqui 的二进制名、配置目录等，后续实现时统一用小写 `eloqi`。
-- 所有文档和代码只做“设计/原创”，**不要引用或复制原项目 GPL 代码**。
+- Xvfb、mock 或交叉编译不等于真机录音/热键/剪贴板/自动上屏/overlay 验收。
+- cgo-free darwin helper 编译不等于 macOS Objective-C/cgo 原生构建通过。
+- 工作流文件存在不等于 CI 全绿；Gitee origin 不会执行 GitHub Actions。
+- Release YAML 存在不等于 tag 已发布或安装包可用。
+- doctor 的 warning 不代表权限已授权；必须由用户在系统设置中确认。

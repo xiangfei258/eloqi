@@ -68,7 +68,7 @@ func (a *Autotype) simulatePaste() error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	var cmd *exec.Cmd
-	operation := "simulate paste"
+	var operation string
 	switch a.session {
 	case "wayland":
 		switch wayland.AutotypeBackendForDesktop(a.desktop) {

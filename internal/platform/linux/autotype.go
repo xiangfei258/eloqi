@@ -5,17 +5,22 @@ package linux
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/xiangchang24/eloqi/internal/platform"
+	"github.com/xiangchang24/eloqi/internal/wayland"
 )
 
 // Autotype implements platform.Autotype by writing text to the clipboard and
-// then simulating a paste keystroke (Ctrl+V). On Wayland it uses wtype; on
-// X11 it uses xdotool.
+// then simulating a paste keystroke (Ctrl+V). Wayland uses ydotool on
+// GNOME/KDE and wtype on compositors that implement the virtual-keyboard
+// protocol; X11 uses xdotool.
 type Autotype struct {
 	session   string
+	desktop   string
 	clipboard platform.Clipboard
 	timeout   time.Duration
 	command   linuxCommandFactory
@@ -31,7 +36,11 @@ func NewAutotype(cb platform.Clipboard) (*Autotype, error) {
 		return nil, err
 	}
 	return &Autotype{
-		session: sess, clipboard: cb, timeout: desktopCommandTimeout, command: exec.CommandContext,
+		session:   sess,
+		desktop:   firstNonEmpty(os.Getenv("XDG_CURRENT_DESKTOP"), os.Getenv("XDG_SESSION_DESKTOP")),
+		clipboard: cb,
+		timeout:   desktopCommandTimeout,
+		command:   exec.CommandContext,
 	}, nil
 }
 
@@ -59,17 +68,37 @@ func (a *Autotype) simulatePaste() error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	var cmd *exec.Cmd
+	operation := "simulate paste"
 	switch a.session {
 	case "wayland":
-		// wtype: -M press modifier, -k tap key, -m release modifier
-		cmd = command(ctx, "wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl")
+		switch wayland.AutotypeBackendForDesktop(a.desktop) {
+		case wayland.AutotypeYdotool:
+			// Linux input-event codes: KEY_LEFTCTRL=29 and KEY_V=47. Send
+			// every edge in one command so a single paste is generated.
+			cmd = command(ctx, "ydotool", "key", "29:1", "47:1", "47:0", "29:0")
+			operation = "simulate paste with ydotool"
+		default:
+			// wtype: -M press modifier, -k tap key, -m release modifier.
+			cmd = command(ctx, "wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl")
+			operation = "simulate paste with wtype"
+		}
 	case "x11":
 		cmd = command(ctx, "xdotool", "key", "ctrl+v")
+		operation = "simulate paste with xdotool"
 	default:
 		return errors.New("linux autotype: unknown session type")
 	}
 	if err := cmd.Run(); err != nil {
-		return desktopCommandError("simulate paste", timeout, ctx, err)
+		return desktopCommandError(operation, timeout, ctx, err)
 	}
 	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }

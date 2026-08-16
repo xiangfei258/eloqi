@@ -6,9 +6,14 @@ This file follows the structure of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Added
+
+- GNOME/KDE Wayland automatic paste now uses the external Ubuntu `ydotool` package (which includes the client, ydotoold, its user unit, and the uinput rule) and emits one complete Ctrl+V edge sequence after updating the clipboard. Sway/wlroots keeps `wtype`, and X11 keeps `xdotool`. Command selection, exact arguments, clipboard ordering, failures, and deadlines are covered by automated tests; Ubuntu 26.04 real-device validation remains pending.
+
 ### Fixed
 
-- `--doctor` no longer reports `autotype.wtype` as healthy just because the binary is installed. It now reads `XDG_CURRENT_DESKTOP` and, on GNOME and KDE Wayland sessions that lack the `zwp_virtual_keyboard_manager_v1` protocol wtype requires, reports a warning (or an error when `output.auto_type = true`). The accurate future options are an XDG RemoteDesktop Portal / EIS(libei) backend, a `/dev/uinput` backend, or an X11/Xorg session via `xdotool`.
+- `--doctor` no longer treats an installed `wtype` binary as sufficient on incompatible compositors. GNOME/KDE now checks for `ydotool` and runs the side-effect-free `ydotool debug` command with a deadline to verify the daemon socket; wlroots desktops still check `wtype`. Missing optional auto-paste support remains a warning when `output.auto_type=false` and becomes an error when it is enabled.
+- The Wayland evdev hotkey backend and doctor now identify and ignore ydotoold's own virtual keyboard, preventing Eloqui's synthesized Ctrl+V from feeding back into modifier-only hotkey detection.
 
 ### Documentation
 

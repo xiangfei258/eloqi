@@ -107,7 +107,7 @@
 | 全局热键 | evdev 直接读 /dev/input/event*（需 input 组权限） | 原生 X11（XGrabKey / 事件循环） | CGEventTap（需辅助功能权限） | GetAsyncKeyState 轮询（约 5ms）+ WH_KEYBOARD_LL 低级钩子做物理边沿回退 |
 | 录音 | 调外部 arecord（ALSA，16kHz/16bit/单声道 raw PCM） | 同左 | CoreAudio / AudioQueue | WinMM waveIn（16kHz/16bit/mono PCM） |
 | 剪贴板 | wl-copy / wl-paste | xclip（含 primary selection） | NSPasteboard | Win32 Unicode 剪贴板 |
-| 自动上屏 | wtype，或 /dev/uinput（KDE Plasma 场景）；写剪贴板后模拟 Ctrl+V | XTest 模拟按键（如 Shift+Insert） | 原生键盘事件注入 | SendInput 发送 Ctrl+V |
+| 自动上屏 | GNOME/KDE 用 ydotoold + /dev/uinput，Sway/wlroots 用 wtype；均先写剪贴板再模拟 Ctrl+V | xdotool 模拟 Ctrl+V | 原生键盘事件注入 | SendInput 发送 Ctrl+V |
 | 状态胶囊 | wlr-layer-shell（Sway/wlroots）；GNOME 下回退到 notify-send | 原生 X11 无边框置顶窗口 | AppKit NSPanel（辅助进程） | 无激活、置顶、点击穿透的 Win32 窗口 |
 
 平台关键注意点（踩坑经验，属于可复用的技术知识）：
@@ -115,6 +115,9 @@
 - Wayland：
   - 热键用 evdev 时不要抢占式 grab 修饰键（EVIOCGRAB），否则会吞掉 Alt+Tab 等系统组合。
   - 需要遍历所有 /dev/input/event* 找到键盘设备。
+  - GNOME Mutter / KDE KWin 不实现 wtype 依赖的 virtual-keyboard 协议，自动上屏改走 ydotoold 的 /dev/uinput；Sway/wlroots 保留 wtype。
+  - ydotoold 必须作为持久 user service 运行；doctor 用无按键副作用的 `ydotool debug` 实测 socket 连接。
+  - evdev 热键枚举必须精确排除 `ydotoold virtual device`，避免合成的 Ctrl+V 反向进入 Eloqui 自己的热键状态机。
   - GNOME/Mutter 不支持 wlr-layer-shell，overlay 必须回退到桌面通知。
 - X11：
   - 自动上屏涉及 primary selection（中键粘贴）与 clipboard 的区别。
@@ -220,5 +223,6 @@
 - 性能：热键响应要即时（事件处理不阻塞）；录音为低延迟流式。
 - 可靠性：出错有明确提示和重试；单次会话结果不重复输出。
 - 可维护性：平台差异隔离在 build-tag 文件；核心逻辑可脱离真实设备测试。
-- 可移植：不依赖管理员权限；Linux 依赖的二进制（arecord/wl-clipboard/wtype/xclip）
-  在 doctor 里检测并提示安装。
+- 可移植：Eloqui 主进程不以管理员身份运行；Wayland 的 evdev/uinput 需要一次性配置
+  `input` 组权限。Linux 依赖的二进制（arecord/wl-clipboard/wtype/ydotool/xclip/xdotool）
+  在 doctor 里按当前桌面检测并提示安装或启动服务。

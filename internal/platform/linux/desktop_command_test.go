@@ -42,15 +42,26 @@ func TestClipboardCommandsHaveDeadline(t *testing.T) {
 }
 
 func TestAutotypeCommandHasDeadline(t *testing.T) {
-	for _, session := range []string{"wayland", "x11"} {
-		autotype := &Autotype{session: session, timeout: 20 * time.Millisecond, command: sleepingCommand}
-		started := time.Now()
-		err := autotype.simulatePaste()
-		if err == nil || !strings.Contains(err.Error(), "timed out") {
-			t.Fatalf("%s simulatePaste error = %v", session, err)
-		}
-		if elapsed := time.Since(started); elapsed > time.Second {
-			t.Fatalf("%s simulatePaste took %s", session, elapsed)
-		}
+	tests := []struct {
+		name    string
+		session string
+		desktop string
+	}{
+		{"wayland wtype", "wayland", "sway"},
+		{"wayland ydotool", "wayland", "GNOME"},
+		{"x11", "x11", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			autotype := &Autotype{session: tt.session, desktop: tt.desktop, timeout: 20 * time.Millisecond, command: sleepingCommand}
+			started := time.Now()
+			err := autotype.simulatePaste()
+			if err == nil || !strings.Contains(err.Error(), "timed out") {
+				t.Fatalf("simulatePaste error = %v", err)
+			}
+			if elapsed := time.Since(started); elapsed > time.Second {
+				t.Fatalf("simulatePaste took %s", elapsed)
+			}
+		})
 	}
 }

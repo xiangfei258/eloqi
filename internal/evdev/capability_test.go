@@ -51,3 +51,47 @@ func TestIsKeyboardDevice(t *testing.T) {
 		t.Fatalf("IsKeyboardDevice error = %v", err)
 	}
 }
+
+func TestDeviceNamePath(t *testing.T) {
+	got, err := DeviceNamePath("/dev/input/event12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "/sys/class/input/event12/device/name"; got != want {
+		t.Fatalf("DeviceNamePath = %q, want %q", got, want)
+	}
+	if _, err := DeviceNamePath("/dev/input/mouse0"); err == nil {
+		t.Fatal("DeviceNamePath accepted a non-event device")
+	}
+}
+
+func TestIsYdotoolVirtualDeviceUsesExactTrimmedName(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		want bool
+	}{
+		{name: "ydotoold virtual device\n", want: true},
+		{name: "  ydotoold virtual device \t", want: true},
+		{name: "ydotoold virtual device clone"},
+		{name: "my ydotoold virtual device"},
+		{name: "USB Keyboard"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := IsYdotoolVirtualDevice("/dev/input/event7", func(path string) ([]byte, error) {
+				if path != "/sys/class/input/event7/device/name" {
+					t.Fatalf("device name path = %q", path)
+				}
+				return []byte(test.name), nil
+			})
+			if err != nil || got != test.want {
+				t.Fatalf("IsYdotoolVirtualDevice = (%v, %v), want (%v, nil)", got, err, test.want)
+			}
+		})
+	}
+
+	want := errors.New("sysfs unavailable")
+	_, err := IsYdotoolVirtualDevice("/dev/input/event8", func(string) ([]byte, error) { return nil, want })
+	if err == nil || !errors.Is(err, want) || !strings.Contains(err.Error(), "event8") {
+		t.Fatalf("IsYdotoolVirtualDevice error = %v", err)
+	}
+}

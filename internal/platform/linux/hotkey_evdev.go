@@ -179,11 +179,25 @@ type evdevHotkey struct {
 
 var _ platform.Hotkey = (*evdevHotkey)(nil)
 
+type evdevHotkeyHost struct {
+	glob     func(string) ([]string, error)
+	openFile func(string, int, os.FileMode) (*os.File, error)
+	readFile func(string) ([]byte, error)
+}
+
 // newEvdevHotkey opens all available evdev devices and starts the event
 // processing goroutines. It returns an error if no devices can be opened
 // (typically because the user is not in the "input" group).
 func newEvdevHotkey() (*evdevHotkey, error) {
-	paths, err := filepath.Glob("/dev/input/event*")
+	return newEvdevHotkeyWithHost(evdevHotkeyHost{
+		glob:     filepath.Glob,
+		openFile: os.OpenFile,
+		readFile: os.ReadFile,
+	})
+}
+
+func newEvdevHotkeyWithHost(host evdevHotkeyHost) (*evdevHotkey, error) {
+	paths, err := host.glob("/dev/input/event*")
 	if err != nil {
 		return nil, fmt.Errorf("evdev: glob devices: %w", err)
 	}
@@ -203,11 +217,19 @@ func newEvdevHotkey() (*evdevHotkey, error) {
 
 	opened := 0
 	for _, p := range paths {
-		f, err := os.OpenFile(p, os.O_RDONLY, 0)
+		ydotoolDevice, probeErr := evdev.IsYdotoolVirtualDevice(p, host.readFile)
+		// Fail closed when the sysfs name cannot be read. The name lives beside
+		// the capability bitmap already required below, and consuming an
+		// unidentified synthetic keyboard can feed Eloqui's own Ctrl+V back into
+		// the global-hotkey state machine.
+		if probeErr != nil || ydotoolDevice {
+			continue
+		}
+		f, err := host.openFile(p, os.O_RDONLY, 0)
 		if err != nil {
 			continue
 		}
-		keyboard, probeErr := evdev.IsKeyboardDevice(p, os.ReadFile)
+		keyboard, probeErr := evdev.IsKeyboardDevice(p, host.readFile)
 		if probeErr != nil || !keyboard {
 			_ = f.Close()
 			continue
@@ -217,7 +239,7 @@ func newEvdevHotkey() (*evdevHotkey, error) {
 	}
 	if opened == 0 {
 		dispatcher.closeAndWait()
-		return nil, fmt.Errorf("evdev: cannot open a keyboard-capable /dev/input/event* device (add user to the 'input' group)")
+		return nil, fmt.Errorf("evdev: cannot open a physical keyboard-capable /dev/input/event* device (ydotoold virtual input is ignored; add user to the 'input' group)")
 	}
 
 	for _, f := range h.files {

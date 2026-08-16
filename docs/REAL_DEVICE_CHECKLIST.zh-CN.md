@@ -58,6 +58,8 @@ ASR：本机 sglang-omni（Docker 容器 moss-transcribe），model=/models/MOSS
 备注：会话日志 session 编号跳过取消的那次（Esc 生效的旁证）。
 ```
 
+> 2026-08-16 代码已为 Ubuntu 26.04 GNOME Wayland 新增 ydotool/uinput 自动上屏；上面的 2026-08-15 记录早于该实现，不能作为新路径通过证据。以下相关复选框保持未勾选，等待用户真机执行。
+
 ### 1.2 Windows amd64 已执行记录（2026-08-15）
 
 ```text
@@ -147,12 +149,21 @@ Linux Wayland、Linux X11、macOS、Windows 分别执行。
 
 ### 3.2 自动上屏模式
 
-1. 先确认 doctor 对自动上屏依赖没有 required error，再设 `output.auto_type = true`。
-2. 在普通权限的纯文本编辑器中保持光标焦点。
-3. 完成一次录音，确认文本只粘贴一次。
-4. 确认 overlay 没有抢走键盘焦点。
-5. 在浏览器输入框、聊天输入框各复测一次。
-6. 将目标切换为受限/提权窗口时，只记录系统权限边界，不为了通过而提升 Eloqui 权限。
+1. Ubuntu 26.04 GNOME/KDE Wayland 先按 `INSTALL.md` 安装 `ydotool`、加入 `input` 组并完整注销重登，再执行：
+
+   ```bash
+   systemctl --user enable --now ydotool.service
+   ydotool debug
+   ```
+
+   两条命令都应成功；`ydotool debug` 本身不发送按键。Sway/wlroots 改为确认 `wtype` 已安装，X11 确认 `xdotool` 已安装。
+2. 运行 `eloqi --doctor --config <配置文件>`，确认当前桌面的 `autotype.ydotool`、`autotype.wtype` 或 `autotype.xdotool` 没有 required error，再设 `output.auto_type = true`。
+3. 在普通权限的临时纯文本编辑器中保持光标焦点；先备份内容，避免误粘贴到敏感窗口。
+4. 完成一次录音，确认 Unicode/换行文本只粘贴一次，剪贴板内容仍逐字一致。
+5. 手动输入 `vVcC`，确认没有 Ctrl/V 残留；自定义或非 QWERTY 布局单独记录结果。
+6. 确认 overlay 没有抢走键盘焦点。
+7. 在浏览器输入框、聊天输入框各复测一次。
+8. 将目标切换为受限/提权窗口时，只记录系统权限边界，不为了通过而提升 Eloqui 权限。
 
 ### 3.3 失败与退出
 
@@ -241,7 +252,8 @@ stop_delay_ms = 1500
 ### 5.3 doctor
 
 - [ ] 缺少必需依赖时是 `[error]`，提示包含可执行的安装/配置动作。
-- [ ] `auto_type=false` 时，缺少 wtype/xdotool 只影响可选能力，不阻止剪贴板模式。
+- [ ] `auto_type=false` 时，缺少 ydotool/ydotoold、wtype 或 xdotool 只产生 warning，不阻止剪贴板模式。
+- [ ] GNOME/KDE 且 `auto_type=true` 时，停止 `ydotool.service` 后 doctor 必须报 required error；恢复服务并通过 `ydotool debug` 后 doctor 变为 `[ok]`。
 - [ ] Wayland 会实际检查至少一个 `/dev/input/event*` 可读；权限不足时提示加入 input 组并重新登录。
 - [ ] X11 不显示 evdev/input 组误报。
 - [ ] macOS 指向启动 Eloqui 的终端/应用的麦克风、辅助功能/输入监控权限。
@@ -307,7 +319,10 @@ Windows 专项：
 - [ ] evdev 遍历并读取所有相关键盘设备；不会用 EVIOCGRAB 吞键。
 - [ ] Alt+Tab、Super 菜单、锁屏快捷键不受影响。
 - [ ] `wl-copy`/`wl-paste` 支持 Unicode 与换行。
-- [ ] `wtype` 不可用时，手动设 `auto_type=false` 后剪贴板模式可用。
+- [ ] Ubuntu 26.04 GNOME：`autotype.ydotool` doctor 检查为 `[ok]`，中文/emoji/换行只自动上屏一次，随后 Ctrl/V 无残留。
+- [ ] ydotoold 虚拟键盘不会被 Eloqui 当作热键输入；一次自动上屏后不会自动开始新录音会话。
+- [ ] GNOME 上停止 ydotoold 后自动上屏明确失败但剪贴板仍保留结果；设 `auto_type=false` 后主流程恢复为剪贴板模式。
+- [ ] Sway/wlroots：`wtype` 自动上屏只执行一次；缺少 wtype 时设 `auto_type=false` 后剪贴板模式可用。
 - [ ] arecord 采样格式正确，停止后麦克风可被其他程序使用。
 
 ### 8.2 Linux X11

@@ -3,11 +3,109 @@
 package linux
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/xiangchang24/eloqi/internal/platform"
 )
+
+func TestNewEvdevHotkeyExcludesYdotoolVirtualDevice(t *testing.T) {
+	paths := []string{"/dev/input/event4", "/dev/input/event7"}
+	files := map[string]string{
+		"/sys/class/input/event4/device/name":             "ydotoold virtual device\n",
+		"/sys/class/input/event4/device/capabilities/key": "80002",
+		"/sys/class/input/event7/device/name":             "USB Keyboard\n",
+		"/sys/class/input/event7/device/capabilities/key": "80002",
+	}
+	placeholder := filepath.Join(t.TempDir(), "event")
+	if err := os.WriteFile(placeholder, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var opened []string
+	hotkey, err := newEvdevHotkeyWithHost(evdevHotkeyHost{
+		glob: func(pattern string) ([]string, error) {
+			if pattern != "/dev/input/event*" {
+				t.Fatalf("glob pattern = %q", pattern)
+			}
+			return paths, nil
+		},
+		openFile: func(path string, _ int, _ os.FileMode) (*os.File, error) {
+			opened = append(opened, path)
+			return os.Open(placeholder)
+		},
+		readFile: func(path string) ([]byte, error) {
+			value, ok := files[path]
+			if !ok {
+				return nil, errors.New("unexpected sysfs path")
+			}
+			return []byte(value), nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := hotkey.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	}()
+	if want := []string{"/dev/input/event7"}; !reflect.DeepEqual(opened, want) {
+		t.Fatalf("opened devices = %v, want %v", opened, want)
+	}
+	if len(hotkey.files) != 1 {
+		t.Fatalf("hotkey files = %d, want 1 physical keyboard", len(hotkey.files))
+	}
+}
+
+func TestNewEvdevHotkeyRejectsOnlyYdotoolVirtualDevice(t *testing.T) {
+	opened := false
+	hotkey, err := newEvdevHotkeyWithHost(evdevHotkeyHost{
+		glob: func(string) ([]string, error) { return []string{"/dev/input/event4"}, nil },
+		openFile: func(string, int, os.FileMode) (*os.File, error) {
+			opened = true
+			return nil, errors.New("must not open ydotool device")
+		},
+		readFile: func(path string) ([]byte, error) {
+			if path != "/sys/class/input/event4/device/name" {
+				t.Fatalf("unexpected sysfs path %q", path)
+			}
+			return []byte("ydotoold virtual device\n"), nil
+		},
+	})
+	if hotkey != nil || err == nil {
+		t.Fatalf("newEvdevHotkeyWithHost = (%v, %v), want (nil, error)", hotkey, err)
+	}
+	if opened {
+		t.Fatal("ydotool virtual device was opened")
+	}
+}
+
+func TestNewEvdevHotkeyFailsClosedWhenDeviceNameIsUnreadable(t *testing.T) {
+	opened := false
+	hotkey, err := newEvdevHotkeyWithHost(evdevHotkeyHost{
+		glob: func(string) ([]string, error) { return []string{"/dev/input/event2"}, nil },
+		openFile: func(string, int, os.FileMode) (*os.File, error) {
+			opened = true
+			return nil, errors.New("unreachable")
+		},
+		readFile: func(path string) ([]byte, error) {
+			if path != "/sys/class/input/event2/device/name" {
+				t.Fatalf("unexpected sysfs path %q", path)
+			}
+			return nil, errors.New("device disappeared")
+		},
+	})
+	if hotkey != nil || err == nil {
+		t.Fatalf("newEvdevHotkeyWithHost = (%v, %v), want (nil, error)", hotkey, err)
+	}
+	if opened {
+		t.Fatal("device with unreadable identity was opened")
+	}
+}
 
 func newTestEvdevHotkey(keys ...platform.Key) *evdevHotkey {
 	h := &evdevHotkey{

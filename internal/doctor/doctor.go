@@ -3,6 +3,7 @@
 package doctor
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,9 +12,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/xiangchang24/eloqi/internal/evdev"
+	"github.com/xiangchang24/eloqi/internal/wayland"
 )
+
+const ydotoolProbeTimeout = 2 * time.Second
 
 // Status is the outcome of one environment check.
 type Status string
@@ -88,8 +93,8 @@ func (r Report) WriteTo(w io.Writer) (int64, error) {
 }
 
 // Options provides injectable host probes for deterministic tests. Empty
-// GOOS/Getenv/LookPath/Glob/Open values use runtime.GOOS, os.Getenv,
-// exec.LookPath, filepath.Glob, and os.Open.
+// GOOS/Getenv/LookPath/Glob/Open/RunCommand values use runtime.GOOS,
+// os.Getenv, exec.LookPath, filepath.Glob, os.Open, and exec.CommandContext.
 type Options struct {
 	GOOS            string
 	Getenv          func(string) string
@@ -97,6 +102,7 @@ type Options struct {
 	Glob            func(string) ([]string, error)
 	Open            func(string) (io.ReadCloser, error)
 	ReadFile        func(string) ([]byte, error)
+	RunCommand      func(context.Context, string, ...string) error
 	RequireAutoType bool
 }
 
@@ -120,6 +126,14 @@ func Check(options Options) Report {
 	}
 	if options.ReadFile == nil {
 		options.ReadFile = os.ReadFile
+	}
+	if options.RunCommand == nil {
+		options.RunCommand = func(ctx context.Context, executable string, args ...string) error {
+			command := exec.CommandContext(ctx, executable, args...)
+			command.Stdout = io.Discard
+			command.Stderr = io.Discard
+			return command.Run()
+		}
 	}
 
 	switch options.GOOS {
@@ -157,7 +171,7 @@ func checkLinux(options Options) Report {
 				"Install wl-clipboard (for example, `sudo apt install wl-clipboard`)."),
 			checkExecutable(options.LookPath, "clipboard.wl-paste", "wl-paste", true,
 				"Install wl-clipboard (for example, `sudo apt install wl-clipboard`)."),
-			checkWtypeAutoType(options),
+			checkWaylandAutoType(options),
 			checkExecutable(options.LookPath, "overlay.notify-send", "notify-send", false,
 				"Install a notify-send provider (for example, `sudo apt install libnotify-bin`) to enable the GNOME overlay fallback."),
 		)
@@ -193,6 +207,13 @@ func checkEvdevAccess(
 		return evdevFailure(fmt.Sprintf("could not inspect %s: %v", pattern, err))
 	}
 	for _, path := range paths {
+		ydotoolDevice, probeErr := evdev.IsYdotoolVirtualDevice(path, readFile)
+		// Keep this fail-closed decision aligned with the runtime hotkey
+		// enumerator. A device whose origin cannot be identified must not make
+		// doctor promise that a physical keyboard is usable.
+		if probeErr != nil || ydotoolDevice {
+			continue
+		}
 		device, err := open(path)
 		if err != nil {
 			continue
@@ -212,7 +233,7 @@ func checkEvdevAccess(
 	if len(paths) == 0 {
 		return evdevFailure("no /dev/input/event* devices were found for the Wayland hotkey backend")
 	}
-	return evdevFailure(fmt.Sprintf("none of the %d /dev/input/event* devices is both readable and keyboard-capable", len(paths)))
+	return evdevFailure(fmt.Sprintf("none of the %d /dev/input/event* devices is a readable physical keyboard (ydotoold virtual input is ignored)", len(paths)))
 }
 
 func evdevFailure(message string) Finding {
@@ -268,53 +289,70 @@ func checkWindows(_ Options) Report {
 	}}
 }
 
-// checkWtypeAutoType reports whether wtype can actually inject keystrokes in
-// the active Wayland session. wtype depends on the wlroots
-// zwp_virtual_keyboard_manager_v1 protocol, which GNOME Mutter and KDE KWin do
-// not implement; on those desktops the binary may be installed yet still fail
-// at runtime, so doctor must not present it as healthy.
-func checkWtypeAutoType(options Options) Finding {
-	const hint = "This Wayland compositor does not implement wtype's virtual-keyboard protocol; set output.auto_type = false to use the clipboard, or sign in to an X11/Xorg session (which uses xdotool)."
+// checkWaylandAutoType selects the backend used by the Linux implementation.
+// GNOME Mutter and KDE KWin require the uinput-backed ydotool path; wlroots
+// compositors retain the less-privileged wtype path.
+func checkWaylandAutoType(options Options) Finding {
+	desktop := strings.TrimSpace(options.Getenv("XDG_CURRENT_DESKTOP"))
+	if desktop == "" {
+		desktop = strings.TrimSpace(options.Getenv("XDG_SESSION_DESKTOP"))
+	}
+	if wayland.AutotypeBackendForDesktop(desktop) == wayland.AutotypeYdotool {
+		return checkYdotoolAutoType(options)
+	}
+	return checkExecutable(
+		options.LookPath,
+		"autotype.wtype",
+		"wtype",
+		options.RequireAutoType,
+		"Install wtype, or set output.auto_type = false and paste from the clipboard manually. On GNOME/KDE Wayland, use the ydotool backend instead.",
+	)
+}
 
-	path, err := options.LookPath("wtype")
+func checkYdotoolAutoType(options Options) Finding {
+	const installHint = "Install Ubuntu's ydotool package (`sudo apt install ydotool`), add your user to the input group (`sudo usermod -aG input \"$USER\"`), sign out and back in, then run `systemctl --user enable --now ydotool.service`."
+	const daemonHint = "Run `systemctl --user enable --now ydotool.service`, then verify it with `ydotool debug`. If /dev/uinput is denied, add your user to the input group and sign out and back in. Set output.auto_type = false to use clipboard-only mode."
+
+	path, err := options.LookPath("ydotool")
 	if err != nil {
-		status := StatusWarning
-		if options.RequireAutoType {
-			status = StatusError
-		}
 		return Finding{
-			ID:       "autotype.wtype",
-			Status:   status,
+			ID:       "autotype.ydotool",
+			Status:   optionalStatus(options.RequireAutoType),
 			Required: options.RequireAutoType,
-			Message:  "wtype was not found in PATH",
-			Hint:     hint,
+			Message:  "ydotool was not found in PATH",
+			Hint:     installHint,
 		}
 	}
 
-	desktop := strings.ToLower(strings.TrimSpace(options.Getenv("XDG_CURRENT_DESKTOP")))
-	unsupported := strings.Contains(desktop, "gnome") ||
-		strings.Contains(desktop, "kde") ||
-		strings.Contains(desktop, "kwin")
-	if !unsupported {
+	ctx, cancel := context.WithTimeout(context.Background(), ydotoolProbeTimeout)
+	defer cancel()
+	err = options.RunCommand(ctx, path, "debug")
+	if err == nil {
 		return Finding{
-			ID:       "autotype.wtype",
+			ID:       "autotype.ydotool",
 			Status:   StatusOK,
 			Required: options.RequireAutoType,
-			Message:  fmt.Sprintf("found wtype at %s", path),
+			Message:  fmt.Sprintf("ydotool at %s connected to ydotoold", path),
 		}
 	}
-
-	status := StatusWarning
-	if options.RequireAutoType {
-		status = StatusError
+	message := fmt.Sprintf("found ydotool at %s, but it could not connect to ydotoold", path)
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+		message = fmt.Sprintf("ydotool at %s did not complete its ydotoold connection probe within %s", path, ydotoolProbeTimeout)
 	}
 	return Finding{
-		ID:       "autotype.wtype",
-		Status:   status,
+		ID:       "autotype.ydotool",
+		Status:   optionalStatus(options.RequireAutoType),
 		Required: options.RequireAutoType,
-		Message:  fmt.Sprintf("found wtype at %s, but %s Wayland does not implement the virtual-keyboard protocol wtype requires", path, desktop),
-		Hint:     hint,
+		Message:  message,
+		Hint:     daemonHint,
 	}
+}
+
+func optionalStatus(required bool) Status {
+	if required {
+		return StatusError
+	}
+	return StatusWarning
 }
 
 func checkExecutable(lookPath func(string) (string, error), id, executable string, required bool, hint string) Finding {

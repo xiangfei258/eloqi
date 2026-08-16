@@ -53,24 +53,53 @@ sudo apt install alsa-utils
 For Wayland / Wayland 会话：
 
 ```bash
-sudo apt install wl-clipboard wtype libnotify-bin
+sudo apt install wl-clipboard libnotify-bin
 ```
 
 - `wl-copy` and `wl-paste` are required for clipboard access / 剪贴板需要 `wl-copy`、`wl-paste`。
-- `wtype` is required only when `output.auto_type = true`; set it to `false` to use clipboard-only mode / 只有自动上屏为 `true` 时才必须安装 `wtype`；设为 `false` 可仅使用剪贴板。
 - `notify-send` is an optional Wayland status fallback. If absent, voice input still works without an overlay / `notify-send` 是可选的 Wayland 状态提示回退；缺失时语音主流程仍可工作。
 
-The Wayland hotkey backend reads `/dev/input/event*`. If `eloqi --doctor` reports that none are readable, add the current user to the `input` group and fully sign out and back in:
+The Wayland hotkey backend reads `/dev/input/event*`, which Ubuntu normally assigns to the `input` group. GNOME/KDE automatic paste additionally uses `/dev/uinput` through ydotoold; Ubuntu's ydotool package installs a separate udev rule that also assigns that device to `input`. Add the current user once and then **fully sign out and back in (or reboot)**:
 
-Wayland 热键后端读取 `/dev/input/event*`。如果 doctor 报告没有可读设备，可把当前用户加入 `input` 组，然后完整注销并重新登录：
+Wayland 热键后端读取 `/dev/input/event*`，Ubuntu 通常由系统既有规则把它们分配给 `input` 组；GNOME/KDE 自动上屏还会由 ydotoold 使用 `/dev/uinput`，ydotool 包会另外安装规则把该设备也分配给 `input` 组。因此只需加入一次，然后必须**完整注销并重新登录（或重启）**：
 
 ```bash
 sudo usermod -aG input "$USER"
 ```
 
-Membership in `input` permits reading raw input events. Apply it only on a trusted personal system and follow your distribution's security policy.
+For Ubuntu 26.04 GNOME/KDE Wayland, install the official `ydotool` package (version 1.0.4-3 at the time of writing) after enabling the Universe repository if necessary. The package contains the client, ydotoold, its systemd user unit, and the uinput rule:
 
-`input` 组可读取原始输入事件，只应在可信个人设备上按发行版安全策略授予。
+Ubuntu 26.04 的 GNOME/KDE Wayland 请安装官方 `ydotool` 包（本文编写时为 1.0.4-3，必要时先启用 Universe）。这个单一包已经包含客户端、ydotoold、systemd user unit 和 uinput 规则：
+
+```bash
+sudo add-apt-repository universe
+sudo apt update
+sudo apt install ydotool
+
+# Run these after signing out and back in / 注销重登后执行：
+systemctl --user enable --now ydotool.service
+ydotool debug
+```
+
+`ydotool debug` must exit successfully before `eloqi --doctor` can mark automatic paste healthy; it connects to the daemon socket but does not send a key. Eloqui later writes Unicode text to the clipboard and invokes `ydotool key 29:1 47:1 47:0 29:0` for one Ctrl+V. Custom/non-QWERTY layouts must be checked on the real desktop because these are physical evdev keycodes.
+
+`ydotool debug` 必须成功退出，`eloqi --doctor` 才会把自动上屏判为健康；它只连接 daemon socket，不会发按键。Eloqui 实际工作时先把 Unicode 文本写入剪贴板，再调用 `ydotool key 29:1 47:1 47:0 29:0` 产生一次 Ctrl+V。自定义/非 QWERTY 布局必须真机核对，因为这里使用物理 evdev 键码。
+
+For Sway and other wlroots compositors that support the virtual-keyboard protocol, install `wtype` instead:
+
+Sway 及其他支持 virtual-keyboard 协议的 wlroots 合成器继续安装 `wtype`：
+
+```bash
+sudo apt install wtype
+```
+
+Set `output.auto_type = false` when neither backend is configured; clipboard-only voice input remains available.
+
+两种后端都未配置时请设 `output.auto_type = false`，仍可使用剪贴板模式。
+
+Membership in `input` permits reading raw input events and, through uinput, generating synthetic input. Grant it only on a trusted personal system and follow your distribution's security policy. Eloqui never runs `sudo` or starts the service for you. ydotool remains a separately installed external AGPL-licensed program and is not bundled into Eloqui.
+
+`input` 组既可读取原始输入事件，也可通过 uinput 生成合成输入；只应在可信个人设备上按发行版安全策略授予。Eloqui 不会代替用户执行 `sudo` 或启动服务。ydotool 是用户另行安装、按其 AGPL 许可证分发的外部程序，不会打包进 Eloqui。
 
 For X11 / X11 会话：
 

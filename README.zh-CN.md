@@ -21,7 +21,7 @@ Eloqui 是用 Go 编写的跨平台桌面语音输入工具：按下全局热键
 
 | 范围 | 当前证据 | 仍需完成 |
 |---|---|---|
-| Linux | 已在 Linux + Xvfb 下通过全仓 build/vet/race 和 golangci-lint；voice、app 热重载与 X11 还做过定向重复 race。 | Wayland 与 X11 真机回归，包括麦克风、热键、剪贴板、自动上屏和 overlay。 |
+| Linux | 已在 Linux + Xvfb 下通过全仓 build/vet/race 和 golangci-lint；voice、app 热重载与 X11 还做过定向重复 race。GNOME/KDE Wayland 现已新增带自动化测试的 ydotool/uinput 上屏后端，wlroots 继续使用 wtype。 | 在 Ubuntu 26.04 GNOME Wayland 真机验证新 ydotool 路径，并完成其余 Wayland/X11 麦克风、热键、剪贴板与 overlay 清单。 |
 | Windows | 本机已通过 `windows/amd64` 全仓 build、vet、test 和 golangci-lint；完成定向 `386` 测试和 `arm64` 平台包/主程序交叉编译。下载的 `v0.1.0-rc.2` 还在 Windows 11 完成部分真机回归：实体 F8/真实麦克风、0ms/长按、中文/emoji/换行剪贴板与自动上屏、录音中 Escape 取消、首请求 503 后 R 重试、overlay 焦点/点击穿透/Alt+Tab，以及退出重启。 | 真实模型识别、普通用户权限、其余取消/错误/TUI 路径、高 DPI/多显示器视觉及由第二个应用接管麦克风仍待验证。 |
 | macOS | 原生 Objective-C/cgo build、vet、race 已在 GitHub 托管的 macOS Intel 与 Apple Silicon runner 上通过。 | 分别完成 Intel/Apple Silicon 的权限、麦克风、热键、剪贴板、自动上屏与 overlay 真机回归。 |
 | CI 与发布 | 发布源 commit `2a73fec` 的 [CI run `31868625541`](https://github.com/xiangfei258/eloqi/actions/runs/31868625541) 在四个目标 runner 与 lint 全绿。[`v0.1.0-rc.2`](https://github.com/xiangfei258/eloqi/releases/tag/v0.1.0-rc.2) 随后通过带门禁的 [Release run](https://github.com/xiangfei258/eloqi/actions/runs/31868700354)、四平台原生产物版本断言、独立归档/校验和/结构复核及文档链接检查；Windows 下载包的 `--doctor` 和最小守护进程启动也已通过。 | Ubuntu/macOS 下载包的 `--doctor`/最小启动与剩余真机清单；完成后再发布正式 `v0.1.0`。 |
@@ -103,6 +103,8 @@ watcher 监听配置所在目录，支持编辑器通过临时文件 + rename �
 | `asr.hotwords` | TOML 字符串数组；去空白/去重后作为识别 prompt 发送，合并上限 8192 字节。 | `[]` |
 | `asr.strip_diarization` | 清理兼容转写结果中完整的 `[时间][说话人]` 标记。 | `false` |
 | `output.auto_type` | `true` 时粘贴到焦点应用；否则只写剪贴板。 | `true` |
+
+GNOME/KDE Wayland 自动上屏需要单独安装 `ydotool` 包，启动其 `ydotool.service` 用户单元（由它运行 ydotoold），并具备 `/dev/uinput` 权限；Sway/wlroots 使用 `wtype`，X11 使用 `xdotool`。开启前请先运行 `eloqi --doctor` 并按 [INSTALL.md](INSTALL.md) 配置。Ubuntu 26.04 新路径仍待用户真机验收。
 
 配置文件包含 ASR 密钥，请妥善保护。在类 Unix 系统上建议执行 `chmod 600 eloqi.toml`。
 

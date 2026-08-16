@@ -10,18 +10,45 @@ import (
 )
 
 const (
-	keyEscape = 1
-	keyR      = 19
+	keyEscape                = 1
+	keyR                     = 19
+	ydotoolVirtualDeviceName = "ydotoold virtual device"
 )
 
-// KeyboardCapabilityPath maps /dev/input/eventN to its sysfs key capability
-// bitmap. Linux exposes the lowest machine word last in this file.
-func KeyboardCapabilityPath(devicePath string) (string, error) {
+func eventDeviceSysfsPath(devicePath, child string) (string, error) {
 	base := path.Base(path.Clean(devicePath))
 	if !strings.HasPrefix(base, "event") || len(base) == len("event") {
 		return "", fmt.Errorf("evdev: invalid event device path %q", devicePath)
 	}
-	return path.Join("/sys/class/input", base, "device/capabilities/key"), nil
+	return path.Join("/sys/class/input", base, "device", child), nil
+}
+
+// KeyboardCapabilityPath maps /dev/input/eventN to its sysfs key capability
+// bitmap. Linux exposes the lowest machine word last in this file.
+func KeyboardCapabilityPath(devicePath string) (string, error) {
+	return eventDeviceSysfsPath(devicePath, "capabilities/key")
+}
+
+// DeviceNamePath maps /dev/input/eventN to the corresponding sysfs device
+// name. The Wayland hotkey backend uses this to avoid consuming input emitted
+// by Eloqui's own ydotool automatic-paste backend.
+func DeviceNamePath(devicePath string) (string, error) {
+	return eventDeviceSysfsPath(devicePath, "name")
+}
+
+// IsYdotoolVirtualDevice reports whether an event device is the persistent
+// virtual keyboard created by ydotoold. The match is deliberately exact after
+// trimming the sysfs newline so similarly named physical devices are retained.
+func IsYdotoolVirtualDevice(devicePath string, readFile func(string) ([]byte, error)) (bool, error) {
+	namePath, err := DeviceNamePath(devicePath)
+	if err != nil {
+		return false, err
+	}
+	name, err := readFile(namePath)
+	if err != nil {
+		return false, fmt.Errorf("evdev: read device name for %s: %w", devicePath, err)
+	}
+	return strings.TrimSpace(string(name)) == ydotoolVirtualDeviceName, nil
 }
 
 // HasKeyboardCapability reports whether a sysfs key bitmap contains both Esc

@@ -2,11 +2,14 @@ package doctor
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeHost struct {
@@ -17,6 +20,8 @@ type fakeHost struct {
 	denied  map[string]error
 	opened  []string
 	keyCaps map[string]string
+	runErr  error
+	ran     []string
 }
 
 func (h *fakeHost) getenv(key string) string {
@@ -48,6 +53,11 @@ func (h *fakeHost) readFile(path string) ([]byte, error) {
 		return []byte(capability), nil
 	}
 	return []byte("80002"), nil
+}
+
+func (h *fakeHost) runCommand(_ context.Context, executable string, args ...string) error {
+	h.ran = append(h.ran, strings.Join(append([]string{executable}, args...), " "))
+	return h.runErr
 }
 
 func findingByID(t *testing.T, report Report, id string) Finding {
@@ -101,21 +111,27 @@ func TestCheckLinuxWaylandReportsActionableMissingDependencies(t *testing.T) {
 	}
 }
 
-func TestCheckLinuxWaylandWtypeCompositorSupport(t *testing.T) {
+func TestCheckLinuxWaylandAutotypeBackendSelection(t *testing.T) {
 	tests := []struct {
-		name       string
-		desktop    string
-		foundWtype bool
-		require    bool
-		want       Status
+		name        string
+		desktop     string
+		sessionDesk string
+		executable  string
+		runErr      error
+		require     bool
+		wantID      string
+		wantStatus  Status
+		wantRun     string
 	}{
-		{"gnome optional warns", "ubuntu:GNOME", true, false, StatusWarning},
-		{"gnome required errors", "GNOME", true, true, StatusError},
-		{"kde required errors", "KDE", true, true, StatusError},
-		{"kwin required errors", "KWin", true, true, StatusError},
-		{"sway ok", "sway", true, true, StatusOK},
-		{"unknown desktop ok", "", true, true, StatusOK},
-		{"missing wtype errors", "GNOME", false, true, StatusError},
+		{"ubuntu gnome uses connected ydotool", "ubuntu:GNOME", "", "ydotool", nil, true, "autotype.ydotool", StatusOK, "/usr/bin/ydotool debug"},
+		{"gnome optional missing ydotool", "GNOME", "", "", nil, false, "autotype.ydotool", StatusWarning, ""},
+		{"gnome optional daemon warning", "GNOME", "", "ydotool", errors.New("daemon unavailable"), false, "autotype.ydotool", StatusWarning, "/usr/bin/ydotool debug"},
+		{"gnome required daemon error", "GNOME", "", "ydotool", errors.New("daemon unavailable"), true, "autotype.ydotool", StatusError, "/usr/bin/ydotool debug"},
+		{"kde missing ydotool", "KDE", "", "", nil, true, "autotype.ydotool", StatusError, ""},
+		{"session desktop fallback", "   ", "ubuntu", "ydotool", nil, true, "autotype.ydotool", StatusOK, "/usr/bin/ydotool debug"},
+		{"sway keeps wtype", "sway", "", "wtype", nil, true, "autotype.wtype", StatusOK, ""},
+		{"unknown desktop keeps wtype", "", "", "wtype", nil, true, "autotype.wtype", StatusOK, ""},
+		{"missing wtype errors", "sway", "", "", nil, true, "autotype.wtype", StatusError, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -124,13 +140,18 @@ func TestCheckLinuxWaylandWtypeCompositorSupport(t *testing.T) {
 				"wl-copy":  "/usr/bin/wl-copy",
 				"wl-paste": "/usr/bin/wl-paste",
 			}
-			if tt.foundWtype {
-				found["wtype"] = "/usr/bin/wtype"
+			if tt.executable != "" {
+				found[tt.executable] = "/usr/bin/" + tt.executable
 			}
 			host := &fakeHost{
-				env:     map[string]string{"WAYLAND_DISPLAY": "wayland-0", "XDG_CURRENT_DESKTOP": tt.desktop},
+				env: map[string]string{
+					"WAYLAND_DISPLAY":     "wayland-0",
+					"XDG_CURRENT_DESKTOP": tt.desktop,
+					"XDG_SESSION_DESKTOP": tt.sessionDesk,
+				},
 				found:   found,
 				devices: []string{"/dev/input/event0"},
+				runErr:  tt.runErr,
 			}
 			report := Check(Options{
 				GOOS:            "linux",
@@ -139,16 +160,78 @@ func TestCheckLinuxWaylandWtypeCompositorSupport(t *testing.T) {
 				Glob:            host.glob,
 				Open:            host.open,
 				ReadFile:        host.readFile,
+				RunCommand:      host.runCommand,
 				RequireAutoType: tt.require,
 			})
-			finding := findingByID(t, report, "autotype.wtype")
-			if finding.Status != tt.want {
-				t.Fatalf("status = %s, want %s (finding=%#v)", finding.Status, tt.want, finding)
+			finding := findingByID(t, report, tt.wantID)
+			if finding.Status != tt.wantStatus {
+				t.Fatalf("status = %s, want %s (finding=%#v)", finding.Status, tt.wantStatus, finding)
 			}
-			if tt.name == "gnome required errors" && !strings.Contains(finding.Message, "virtual-keyboard protocol") {
-				t.Fatalf("incompatible message missing detail: %q", finding.Message)
+			if finding.Required != tt.require {
+				t.Fatalf("required = %v, want %v (finding=%#v)", finding.Required, tt.require, finding)
+			}
+			if gotOK, wantOK := report.OK(), tt.wantStatus != StatusError; gotOK != wantOK {
+				t.Fatalf("Report.OK() = %v, want %v (error=%v)", gotOK, wantOK, report.Error())
+			}
+			if got := strings.Join(host.ran, ","); got != tt.wantRun {
+				t.Fatalf("RunCommand calls = %q, want %q", got, tt.wantRun)
+			}
+			looked := strings.Join(host.looked, ",")
+			if tt.wantID == "autotype.ydotool" && strings.Contains(looked, "wtype") {
+				t.Fatalf("uinput desktop unexpectedly probed wtype: %v", host.looked)
+			}
+			if tt.wantID == "autotype.wtype" && strings.Contains(looked, "ydotool") {
+				t.Fatalf("wtype desktop unexpectedly probed ydotool: %v", host.looked)
 			}
 		})
+	}
+}
+
+func TestCheckLinuxWaylandYdotoolProbeTimeoutIsActionable(t *testing.T) {
+	host := &fakeHost{
+		env: map[string]string{
+			"WAYLAND_DISPLAY":     "wayland-0",
+			"XDG_CURRENT_DESKTOP": "GNOME",
+		},
+		found: map[string]string{
+			"arecord":  "/usr/bin/arecord",
+			"wl-copy":  "/usr/bin/wl-copy",
+			"wl-paste": "/usr/bin/wl-paste",
+			"ydotool":  "/usr/bin/ydotool",
+		},
+		devices: []string{"/dev/input/event0"},
+	}
+	sawDeadline := false
+	report := Check(Options{
+		GOOS:     "linux",
+		Getenv:   host.getenv,
+		LookPath: host.lookPath,
+		Glob:     host.glob,
+		Open:     host.open,
+		ReadFile: host.readFile,
+		RunCommand: func(ctx context.Context, executable string, args ...string) error {
+			if executable != "/usr/bin/ydotool" || !reflect.DeepEqual(args, []string{"debug"}) {
+				t.Fatalf("RunCommand = %q %v", executable, args)
+			}
+			deadline, ok := ctx.Deadline()
+			remaining := time.Until(deadline)
+			if !ok || remaining <= time.Second || remaining > ydotoolProbeTimeout {
+				t.Fatalf("probe context deadline = %v, remaining %s", ok, remaining)
+			}
+			sawDeadline = true
+			return context.DeadlineExceeded
+		},
+		RequireAutoType: true,
+	})
+	if !sawDeadline {
+		t.Fatal("ydotool probe did not receive a deadline")
+	}
+	finding := findingByID(t, report, "autotype.ydotool")
+	if finding.Status != StatusError || !strings.Contains(finding.Message, "within 2s") {
+		t.Fatalf("timeout finding = %#v", finding)
+	}
+	if !strings.Contains(finding.Hint, "systemctl --user") || !strings.Contains(finding.Hint, "input group") {
+		t.Fatalf("timeout hint is not actionable: %q", finding.Hint)
 	}
 }
 
@@ -253,6 +336,43 @@ func TestCheckLinuxWaylandRequiresReadableEvdevDevice(t *testing.T) {
 				t.Fatalf("evdev remediation is not actionable: %q", finding.Hint)
 			}
 		})
+	}
+}
+
+func TestCheckLinuxWaylandDoesNotCountYdotoolVirtualKeyboard(t *testing.T) {
+	host := &fakeHost{
+		env: map[string]string{
+			"WAYLAND_DISPLAY":     "wayland-1",
+			"XDG_CURRENT_DESKTOP": "GNOME",
+		},
+		found: map[string]string{
+			"arecord":  "/bin/arecord",
+			"wl-copy":  "/bin/wl-copy",
+			"wl-paste": "/bin/wl-paste",
+		},
+		devices: []string{"/dev/input/event9"},
+		keyCaps: map[string]string{
+			"/sys/class/input/event9/device/name":             "ydotoold virtual device\n",
+			"/sys/class/input/event9/device/capabilities/key": "80002",
+		},
+	}
+	report := Check(Options{
+		GOOS:     "linux",
+		Getenv:   host.getenv,
+		LookPath: host.lookPath,
+		Glob:     host.glob,
+		Open:     host.open,
+		ReadFile: host.readFile,
+	})
+	finding := findingByID(t, report, "hotkey.evdev-access")
+	if finding.Status != StatusError || !finding.Required {
+		t.Fatalf("ydotool-only evdev finding = %#v", finding)
+	}
+	if !strings.Contains(finding.Message, "physical keyboard") || !strings.Contains(finding.Message, "ydotoold virtual input is ignored") {
+		t.Fatalf("ydotool-only evdev message is ambiguous: %q", finding.Message)
+	}
+	if len(host.opened) != 0 {
+		t.Fatalf("doctor opened ydotool virtual device: %v", host.opened)
 	}
 }
 

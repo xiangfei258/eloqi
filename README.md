@@ -21,7 +21,7 @@ Eloqui is a cross-platform desktop voice-input tool written in Go. A global hotk
 
 | Area | Current evidence | Still required |
 |---|---|---|
-| Linux | Full repository build/vet/race and golangci-lint passed under Linux with Xvfb; focused voice, app-reload, and X11 race repetitions also passed. | Wayland and X11 real-device regression, including microphone, hotkeys, clipboard, auto-paste, and overlay. |
+| Linux | Full repository build/vet/race and golangci-lint passed under Linux with Xvfb; focused voice, app-reload, and X11 race repetitions also passed. GNOME/KDE Wayland now uses an automated-test-covered ydotool/uinput paste backend, while wlroots keeps wtype. | Ubuntu 26.04 GNOME Wayland real-device validation of the new ydotool path, plus the remaining Wayland/X11 microphone, hotkey, clipboard, and overlay checks. |
 | Windows | `windows/amd64` full build, vet, tests, and golangci-lint passed locally; focused `386` tests and `arm64` platform/main-program cross-build passed. The downloaded `v0.1.0-rc.2` archive also passed a partial Windows 11 physical run: real F8 hotkey/microphone input, zero-delay/long-hold behavior, exact Chinese/emoji/newline clipboard output plus one automatic-paste run, recording cancellation with Escape, fail-once R retry, overlay focus/click-through/Alt+Tab, and clean shutdown/restart. | Real-model transcription, ordinary-user permissions, the remaining cancellation/error/TUI paths, high-DPI/multi-display visuals, and microphone release to a second application. |
 | macOS | Native Objective-C/cgo build, vet, and race tests passed on GitHub-hosted macOS Intel and Apple Silicon runners. | Intel/Apple Silicon real-device regression for permissions, microphone, hotkeys, clipboard, automatic paste, and overlay. |
 | CI and release | Release-source commit `2a73fec` passed [CI run `31868625541`](https://github.com/xiangfei258/eloqi/actions/runs/31868625541) on four target runners plus lint. [`v0.1.0-rc.2`](https://github.com/xiangfei258/eloqi/releases/tag/v0.1.0-rc.2) then passed the gated [Release run](https://github.com/xiangfei258/eloqi/actions/runs/31868700354), four native version checks, independent archive/checksum/layout verification, and documentation-link checks. The Windows download has now also passed `--doctor` and minimum daemon startup. | Ubuntu/macOS download `--doctor`/minimum startup and the remaining real-device checklist before stable `v0.1.0`. |
@@ -103,6 +103,8 @@ See [eloqi.toml.example](eloqi.toml.example) for a complete annotated file.
 | `asr.hotwords` | TOML string array passed as a recognition prompt after trim/deduplication; combined prompt limit is 8192 bytes. | `[]` |
 | `asr.strip_diarization` | Remove complete `[timestamp][speaker]` annotations from compatible transcripts. | `false` |
 | `output.auto_type` | Paste into the focused app when `true`; otherwise only update the clipboard. | `true` |
+
+On GNOME/KDE Wayland, automatic paste requires the separately installed `ydotool` package, its `ydotool.service` user unit (which runs ydotoold), and `/dev/uinput` access; Sway/wlroots uses `wtype`, and X11 uses `xdotool`. Run `eloqi --doctor` before enabling it and follow [INSTALL.md](INSTALL.md). Real-device validation of the new Ubuntu 26.04 path remains pending.
 
 Protect the configuration file because it contains the ASR credential. On Unix-like systems, `chmod 600 eloqi.toml` is recommended.
 

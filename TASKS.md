@@ -43,7 +43,7 @@
 - [x] `arecord`：16 kHz、16 bit、单声道 raw PCM。
 - [x] OpenAI 兼容非流式 ASR 客户端。
 - [x] Wayland `wl-copy`/`wl-paste` 与 X11 `xclip`。
-- [x] Wayland `wtype` 与 X11 `xdotool` 自动上屏。
+- [x] Wayland 自动上屏：GNOME/KDE 用 `ydotool` + `ydotoold`，Sway/wlroots 用 `wtype`；X11 用 `xdotool`。
 - [x] Wayland evdev 与原生 X11 全局热键。
 
 ### P1.3 最小闭环与加固
@@ -59,7 +59,7 @@
 - [x] Linux 自动化 build/vet/race 已覆盖当前 P1 代码。
 - [x] P1 热键复测（Linux Wayland 2026-08-15）：toggle + modifier-only（`Alt+Super`）闭环通过；hold、modifier+Tab 反例、锁定键、自动重复、左右修饰键、修饰键先松仍需专项复测。
 
-> GNOME Wayland 已知边界：`wtype` 在部分桌面不可用；此时使用 `output.auto_type = false`，转写只进入剪贴板。
+> GNOME Wayland 不支持 `wtype` 所需协议；当前代码已改用 Ubuntu 26.04 的 `ydotool`/`ydotoold` uinput 路径，并有命令选择、完整 Ctrl+V 边沿和 doctor 探测自动化。真实桌面上屏仍待用户验收；验收前可保持 `output.auto_type = false`。
 
 ---
 
@@ -104,7 +104,7 @@
 
 **真机验收**：
 
-- [x] Linux Wayland（2026-08-15，剪贴板模式；auto_type 受 GNOME 限制）。
+- [x] Linux Wayland（2026-08-15，剪贴板模式；该记录早于 2026-08-16 新增的 GNOME ydotool 自动上屏路径，不能替代其真机验收）。
 - [ ] Linux X11。
 - [ ] macOS Intel。
 - [ ] macOS Apple Silicon。
@@ -119,14 +119,14 @@
 - [x] TUI 原子保存，并保留注释与显式扩展 TOML 节/字段（`plugin.*`/`x-*`、`x_`）；其他未知项拒绝。
 - [x] 目录级配置 watcher：轮询、内容摘要、防抖、校验、异步有界回调与安全 Close。
 - [x] 应用运行时热重载；每个运行世代独占 Hotkey provider，新配置无效或新热键注册失败时用全新 provider 恢复旧配置。
-- [x] `--doctor` 检查 Linux 依赖、Wayland evdev 实际可读性与 macOS/Windows 权限提示。
+- [x] `--doctor` 检查 Linux 依赖、Wayland evdev 实际可读性、GNOME/KDE 的 ydotoold socket 连通性与 macOS/Windows 权限提示。
 - [x] TUI 结构化日志只写用户缓存文件，不污染交互界面。
 - [x] CLI 与 app 装配测试覆盖 TUI、doctor、正常运行、热重载和退出清理。
 
 **自动化验收**：
 
 - [x] `internal/config` watcher 在阻塞回调、自 Close、并发 Close 和原子 rename 场景下通过 race 测试。
-- [x] `internal/doctor` 对 Wayland/X11 分支、依赖缺失和 evdev 权限提示有单元测试。
+- [x] `internal/doctor` 对 Wayland/X11 分支、wtype/ydotool 后端选择、ydotoold 探测、依赖缺失和 evdev 权限提示有单元测试。
 - [x] `internal/tui` 覆盖完整字段 round-trip、取消、密钥保护、原子替换和显式扩展字段保留。
 - [x] app 集成测试覆盖重载失败回滚、上一份配置继续工作，以及旧 provider 的尾部事件不会被新世代消费。
 - [x] Linux Wayland 真机（2026-08-15）：守护进程 + TUI 双进程热重载即时生效（日志 `configuration reloaded`）、TUI API key 不回显、终端无日志污染。
@@ -171,9 +171,9 @@
 
 ---
 
-## 当前结论（2026-08-15）
+## 当前结论（2026-08-16）
 
-- P0、P1、P2 的代码与既有自动化证据已闭合；Linux Wayland 主流程已有部分真机证据，P1 加固后的细粒度热键专项与其余 P2 真机项仍待执行。
+- P0、P1、P2 的代码与既有自动化证据已闭合；Ubuntu 26.04 GNOME Wayland 自动上屏已新增 ydotool/uinput 实现与自动化覆盖，但其真机上屏和 P1 细粒度热键专项仍待用户执行。
 - P3 的 Windows 自动化证据与 macOS Intel/Apple Silicon 原生 SDK 构建证据已具备；Windows 已有部分真机证据，但真实模型、普通用户权限与完整资源释放等仍是验收阻塞项。
 - P4、P5 的实现和自动化覆盖已落地；Windows 已验证直接配置热重载、统计、Unicode 剪贴板/自动上屏、录音中 Escape、R 重试及 overlay 焦点/点击穿透，TUI 双进程、其余错误/取消路径和其他平台视觉仍待执行。
 - P6 工作流、远端 CI、测试 tag、四平台归档、版本注入、下载后校验和/结构复核已闭合；Windows 下载包的 `--doctor` 与最小启动已通过，Ubuntu/macOS 及完整硬件验收仍未闭合，因此尚不发布正式 `v0.1.0`。

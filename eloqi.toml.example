@@ -49,6 +49,7 @@ strip_diarization = false
 
 [output]
 # true：先写剪贴板，再模拟粘贴到当前焦点应用。
-# false：只写剪贴板，适合首次运行和 GNOME Wayland 等自动上屏受限环境。
-# Linux true 需要 Wayland 的 wtype 或 X11 的 xdotool。
+# false：只写剪贴板，适合首次运行或尚未配置自动上屏依赖的环境。
+# Linux true：GNOME/KDE Wayland 需要 ydotoold，Sway/wlroots 需要 wtype，X11 需要 xdotool。
+# 开启前先运行 eloqi --doctor；Ubuntu 26.04 ydotool 配置见 INSTALL.md。
 auto_type = true

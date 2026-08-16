@@ -69,7 +69,7 @@ eloqi --version
 - 项目骨架、MIT、module、平台接口/mock 和 Linux 最小闭环已完成。
 - 2026-08-14 曾在 GNOME Wayland 做过 P1 原始闭环真机验证：`Alt+Super` toggle，本机兼容 ASR，输出到剪贴板。
 - 后续已经加固 evdev/X11 热键、arecord 停止/尾音频和错误传播，但这些加固后的真机回归还没做。
-- GNOME Wayland 下 `wtype` 结构性不兼容：Mutter 不实现 wtype 依赖的 `zwp_virtual_keyboard_manager_v1`，因此 `auto_type=true` 会失败，应设 `output.auto_type=false` 使用剪贴板模式。`--doctor` 已改为检测合成器，在 GNOME/KDE 上把 wtype 判为不兼容而非「已安装即通过」。未来若要在 GNOME Wayland 上支持自动上屏，可选 XDG RemoteDesktop Portal、EIS(libei) 或 `/dev/uinput` 后端（均未实现）；X11/Xorg 会话可用现有 `xdotool` 路径。
+- GNOME Wayland 下 `wtype` 结构性不兼容：Mutter 不实现其 `zwp_virtual_keyboard_manager_v1` 协议。当前实现已在 GNOME/KDE 切到 Ubuntu 26.04 官方 `ydotool` 1.0.4-3 + `ydotoold` 的 `/dev/uinput` 路径，发送完整 `Ctrl down / V down / V up / Ctrl up`；Sway/wlroots 继续用 `wtype`，X11 用 `xdotool`。`--doctor` 会执行无按键副作用的 `ydotool debug` 实测 daemon/socket，而不是只看二进制。自动化已覆盖，GNOME 真机上屏仍待用户验收。
 
 ### P2
 
@@ -96,7 +96,7 @@ macOS 源码和当前边界：
 - 不依赖 cgo 的热键/overlay 状态逻辑已为 amd64/arm64 交叉编译。
 - GitHub Actions 已在 `macos-15-intel` 与 `macos-15`（Apple Silicon）真实 macOS SDK runner 上完成原生 Objective-C/cgo build、vet、race；这证明源码可构建，不等于热键、录音、权限或 overlay 真机通过。
 
-Linux Wayland 已有部分真机证据，但热键细粒度、自动上屏和 overlay 视觉仍未闭环；Windows 已完成下载版 rc.2 的部分真机回归；Linux X11 与 macOS 真机项尚未执行。
+Linux Wayland 已有部分真机证据，但热键细粒度、新 ydotool 自动上屏和 overlay 视觉仍未闭环；Windows 已完成下载版 rc.2 的部分真机回归；Linux X11 与 macOS 真机项尚未执行。
 
 ### P4
 
@@ -106,7 +106,7 @@ Linux Wayland 已有部分真机证据，但热键细粒度、自动上屏和 ov
 - watcher 监听目录并重开目标路径，支持原子替换；默认 100ms 轮询、200ms 防抖。
 - watcher 回调与轮询解耦，阻塞回调不妨碍内部关闭；Close 可并发/重复/在回调内调用。
 - runtime 热重载会校验配置；每个运行世代独占 Hotkey provider。旧 Voice 停止并关闭旧 provider 后才创建新世代，失败回滚也使用全新 provider，旧事件尾部不会进入新 Voice。
-- doctor 在 Wayland 实际尝试打开 `/dev/input/event*`，X11 不误报 evdev；依赖提示可操作。
+- doctor 在 Wayland 实际尝试打开 `/dev/input/event*`，X11 不误报 evdev；GNOME/KDE 还用 `ydotool debug` 实测 ydotoold 连通性，依赖提示包含安装、input 组、重新登录和 user service 启动步骤。doctor 与运行时会共同排除 ydotoold 虚拟键盘，避免自动上屏的 Ctrl+V 回灌到热键处理。
 - TUI 日志只进系统用户缓存文件；app 装配与 P4 包的集成/race 测试已通过。
 
 仍需在真实桌面人工确认：守护进程 + TUI 双进程热重载、终端不被日志污染。Windows 已确认直接修改 `stop_delay_ms`/`auto_type` 后热重载生效；provider 世代与资源切换仍由自动化测试覆盖，未把黑盒现象写成真机内部证明。
@@ -193,7 +193,7 @@ Windows PowerShell 缓存写法见 `INSTALL.md`。macOS 原生代码只能在带
 
 ## 7. 下一步（按顺序）
 
-1. 在 Windows 补真实模型、普通用户、Unicode/错误/TUI、高 DPI/多显示器和第二应用麦克风接管；在 Ubuntu Wayland 先补 6 个热键细粒度专项，再补自动上屏与 overlay 视觉。
+1. 由用户在 Ubuntu 26.04 GNOME Wayland 安装并启动 ydotoold，执行新自动上屏真机清单；同时补 6 个热键细粒度专项与 overlay 视觉。Windows 剩余真实模型等专项按用户安排后续再做。
 2. 后续补 Linux X11 与 macOS Intel/Apple Silicon 真机；不要用 CI、Xvfb 或交叉编译代填“通过”。
 3. 所有目标平台阻断项清零后再发布正式 `v0.1.0`。
 

@@ -101,6 +101,57 @@ func TestCheckLinuxWaylandReportsActionableMissingDependencies(t *testing.T) {
 	}
 }
 
+func TestCheckLinuxWaylandWtypeCompositorSupport(t *testing.T) {
+	tests := []struct {
+		name       string
+		desktop    string
+		foundWtype bool
+		require    bool
+		want       Status
+	}{
+		{"gnome optional warns", "ubuntu:GNOME", true, false, StatusWarning},
+		{"gnome required errors", "GNOME", true, true, StatusError},
+		{"kde required errors", "KDE", true, true, StatusError},
+		{"kwin required errors", "KWin", true, true, StatusError},
+		{"sway ok", "sway", true, true, StatusOK},
+		{"unknown desktop ok", "", true, true, StatusOK},
+		{"missing wtype errors", "GNOME", false, true, StatusError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			found := map[string]string{
+				"arecord":  "/usr/bin/arecord",
+				"wl-copy":  "/usr/bin/wl-copy",
+				"wl-paste": "/usr/bin/wl-paste",
+			}
+			if tt.foundWtype {
+				found["wtype"] = "/usr/bin/wtype"
+			}
+			host := &fakeHost{
+				env:     map[string]string{"WAYLAND_DISPLAY": "wayland-0", "XDG_CURRENT_DESKTOP": tt.desktop},
+				found:   found,
+				devices: []string{"/dev/input/event0"},
+			}
+			report := Check(Options{
+				GOOS:            "linux",
+				Getenv:          host.getenv,
+				LookPath:        host.lookPath,
+				Glob:            host.glob,
+				Open:            host.open,
+				ReadFile:        host.readFile,
+				RequireAutoType: tt.require,
+			})
+			finding := findingByID(t, report, "autotype.wtype")
+			if finding.Status != tt.want {
+				t.Fatalf("status = %s, want %s (finding=%#v)", finding.Status, tt.want, finding)
+			}
+			if tt.name == "gnome required errors" && !strings.Contains(finding.Message, "virtual-keyboard protocol") {
+				t.Fatalf("incompatible message missing detail: %q", finding.Message)
+			}
+		})
+	}
+}
+
 func TestCheckLinuxX11WithRequiredAutoType(t *testing.T) {
 	host := &fakeHost{
 		env: map[string]string{"DISPLAY": ":1"},

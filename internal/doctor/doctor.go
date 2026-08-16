@@ -157,8 +157,7 @@ func checkLinux(options Options) Report {
 				"Install wl-clipboard (for example, `sudo apt install wl-clipboard`)."),
 			checkExecutable(options.LookPath, "clipboard.wl-paste", "wl-paste", true,
 				"Install wl-clipboard (for example, `sudo apt install wl-clipboard`)."),
-			checkExecutable(options.LookPath, "autotype.wtype", "wtype", options.RequireAutoType,
-				"Install wtype, or set output.auto_type = false and paste from the clipboard manually."),
+			checkWtypeAutoType(options),
 			checkExecutable(options.LookPath, "overlay.notify-send", "notify-send", false,
 				"Install a notify-send provider (for example, `sudo apt install libnotify-bin`) to enable the GNOME overlay fallback."),
 		)
@@ -267,6 +266,55 @@ func checkWindows(_ Options) Report {
 			Hint:     "Open Settings > Privacy & security > Microphone and enable desktop app access.",
 		},
 	}}
+}
+
+// checkWtypeAutoType reports whether wtype can actually inject keystrokes in
+// the active Wayland session. wtype depends on the wlroots
+// zwp_virtual_keyboard_manager_v1 protocol, which GNOME Mutter and KDE KWin do
+// not implement; on those desktops the binary may be installed yet still fail
+// at runtime, so doctor must not present it as healthy.
+func checkWtypeAutoType(options Options) Finding {
+	const hint = "This Wayland compositor does not implement wtype's virtual-keyboard protocol; set output.auto_type = false to use the clipboard, or sign in to an X11/Xorg session (which uses xdotool)."
+
+	path, err := options.LookPath("wtype")
+	if err != nil {
+		status := StatusWarning
+		if options.RequireAutoType {
+			status = StatusError
+		}
+		return Finding{
+			ID:       "autotype.wtype",
+			Status:   status,
+			Required: options.RequireAutoType,
+			Message:  "wtype was not found in PATH",
+			Hint:     hint,
+		}
+	}
+
+	desktop := strings.ToLower(strings.TrimSpace(options.Getenv("XDG_CURRENT_DESKTOP")))
+	unsupported := strings.Contains(desktop, "gnome") ||
+		strings.Contains(desktop, "kde") ||
+		strings.Contains(desktop, "kwin")
+	if !unsupported {
+		return Finding{
+			ID:       "autotype.wtype",
+			Status:   StatusOK,
+			Required: options.RequireAutoType,
+			Message:  fmt.Sprintf("found wtype at %s", path),
+		}
+	}
+
+	status := StatusWarning
+	if options.RequireAutoType {
+		status = StatusError
+	}
+	return Finding{
+		ID:       "autotype.wtype",
+		Status:   status,
+		Required: options.RequireAutoType,
+		Message:  fmt.Sprintf("found wtype at %s, but %s Wayland does not implement the virtual-keyboard protocol wtype requires", path, desktop),
+		Hint:     hint,
+	}
 }
 
 func checkExecutable(lookPath func(string) (string, error), id, executable string, required bool, hint string) Finding {

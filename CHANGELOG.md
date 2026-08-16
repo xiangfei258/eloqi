@@ -6,6 +6,10 @@ This file follows the structure of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- `--doctor` no longer reports `autotype.wtype` as healthy just because the binary is installed. It now reads `XDG_CURRENT_DESKTOP` and, on GNOME and KDE Wayland sessions that lack the `zwp_virtual_keyboard_manager_v1` protocol wtype requires, reports a warning (or an error when `output.auto_type = true`). The accurate future options are an XDG RemoteDesktop Portal / EIS(libei) backend, a `/dev/uinput` backend, or an X11/Xorg session via `xdotool`.
+
 ### Documentation
 
 - Recorded the partial Windows 11 real-device acceptance of the downloaded `v0.1.0-rc.2` package. Physical hotkey/microphone capture, zero-delay and long-hold behavior, exact Chinese/emoji/newline clipboard output plus one automatic-paste run, recording cancellation with Escape, fail-once R retry, overlay interaction, statistics, shutdown, and restart passed through a loopback WAV-validating endpoint; real-model, ordinary-user, remaining cancellation/error/TUI, high-DPI/multi-display, and second-application microphone checks remain open.

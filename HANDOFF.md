@@ -69,7 +69,7 @@ eloqi --version
 - 项目骨架、MIT、module、平台接口/mock 和 Linux 最小闭环已完成。
 - 2026-08-14 曾在 GNOME Wayland 做过 P1 原始闭环真机验证：`Alt+Super` toggle，本机兼容 ASR，输出到剪贴板。
 - 后续已经加固 evdev/X11 热键、arecord 停止/尾音频和错误传播，但这些加固后的真机回归还没做。
-- GNOME Wayland 下 `wtype` 存在桌面兼容限制；可设 `output.auto_type=false` 使用剪贴板模式。
+- GNOME Wayland 下 `wtype` 结构性不兼容：Mutter 不实现 wtype 依赖的 `zwp_virtual_keyboard_manager_v1`，因此 `auto_type=true` 会失败，应设 `output.auto_type=false` 使用剪贴板模式。`--doctor` 已改为检测合成器，在 GNOME/KDE 上把 wtype 判为不兼容而非「已安装即通过」。未来若要在 GNOME Wayland 上支持自动上屏，可选 XDG RemoteDesktop Portal、EIS(libei) 或 `/dev/uinput` 后端（均未实现）；X11/Xorg 会话可用现有 `xdotool` 路径。
 
 ### P2
 
